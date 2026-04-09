@@ -1,0 +1,11 @@
+vina
+rdkit
+pdbfixer
+openmm
+openbabel
+prolif
+numpy
+pandas
+matplotlib
+seaborn
+pillow

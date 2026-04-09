@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "molecopilot": {
+      "command": "conda",
+      "args": ["run", "-n", "molecopilot", "python", "/Users/nicholaspardon/Desktop/Projects/Kaleem/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "/Users/nicholaspardon/Desktop/Projects/Kaleem",
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["chrome-devtools-mcp@latest"]
+    }
+  }
+}

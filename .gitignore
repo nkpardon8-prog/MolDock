@@ -1,0 +1,11 @@
+data/
+reports/
+.env
+__pycache__/
+*.pyc
+*.pdbqt
+*.sdf
+.DS_Store
+molecopilot.db
+tmp/
+worktrees/

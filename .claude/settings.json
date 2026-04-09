@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/nicholaspardon/Downloads/March\\\\ 7\\\\ estim8/ESTIM8FCKINWORK/backend/pipeline/**)",
+      "Read(//private/tmp/**)",
+      "Bash(curl -s http://localhost:8000/)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -C $HOME/dotfiles/claude pull --ff-only 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/dotfiles/claude/scripts/dotfiles-sync.sh",
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+  "effortLevel": "high",
+  "skipDangerousModePermissionPrompt": true
+}
