@@ -57,7 +57,7 @@ export default function DockPage() {
     setJobId(null)
 
     try {
-      const res = await apiPost<{ job_id: string; status: string }>('/api/dock', {
+      const res = await apiPost<{ job_id: string; status: string }>('/api/dock/', {
         pdb_id: pdbId.trim().toUpperCase(),
         compound: compound.trim(),
         exhaustiveness,

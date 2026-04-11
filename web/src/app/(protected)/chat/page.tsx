@@ -136,7 +136,7 @@ export default function ChatPage() {
       const body: Record<string, unknown> = { message: text }
       if (activeSessionId) body.session_id = activeSessionId
 
-      const res = await apiPost<{ job_id: string; session_id: string }>('/api/chat', body)
+      const res = await apiPost<{ job_id: string; session_id: string }>('/api/chat/', body)
 
       if (!activeSessionId) {
         setActiveSessionId(res.session_id)

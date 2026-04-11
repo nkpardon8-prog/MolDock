@@ -107,7 +107,7 @@ export default function OptimizePage() {
         body.property_name = null
         body.scaled_radius = scaledRadius
       }
-      const resp = await apiPost<{ job_id: string }>('/api/optimize', body)
+      const resp = await apiPost<{ job_id: string }>('/api/optimize/', body)
       setJobId(resp.job_id)
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to start optimization')

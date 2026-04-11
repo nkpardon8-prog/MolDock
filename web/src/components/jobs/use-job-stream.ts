@@ -63,7 +63,7 @@ export function useJobStream(jobId: string | null): UseJobStreamReturn {
           headers['Authorization'] = `Bearer ${token}`;
         }
 
-        const response = await fetch(`${API_URL}/jobs/${jobId}/stream`, {
+        const response = await fetch(`${API_URL}/api/jobs/${jobId}/stream`, {
           headers,
           signal: controller.signal,
         });
