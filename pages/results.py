@@ -19,6 +19,7 @@ from components.database import (
     get_all_compounds,
 )
 from components.charts import energy_bar_chart, energy_histogram
+from components.file_viewer import render_file_panel, OutputFile
 
 # Ensure DB tables exist
 init_db()
@@ -306,10 +307,15 @@ with tab_detail:
                         metric_cols[1].metric("SA Score", "N/A")
 
             # File paths
-            with st.expander("Output Files"):
-                st.code(f"Docked output: {detail.get('output_path', 'N/A')}")
-                st.code(f"Protein PDB:   {detail.get('protein_pdb_path', 'N/A')}")
-                st.code(f"Protein PDBQT: {detail.get('protein_pdbqt_path', 'N/A')}")
+            with st.expander("Output Files", expanded=True):
+                _files = []
+                if detail.get("output_path"):
+                    _files.append(OutputFile(detail["output_path"], role="docked"))
+                if detail.get("protein_pdb_path"):
+                    _files.append(OutputFile(detail["protein_pdb_path"], role="receptor", label="Protein (PDB)"))
+                if detail.get("protein_pdbqt_path"):
+                    _files.append(OutputFile(detail["protein_pdbqt_path"], role="receptor", label="Protein (PDBQT)"))
+                render_file_panel(_files, panel_id="results_output")
 
             # Interactions (if available)
             interactions = detail.get("interactions_json")

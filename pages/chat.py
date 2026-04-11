@@ -12,6 +12,7 @@ import subprocess
 import json
 import re
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -190,52 +191,95 @@ if prompt := st.chat_input("Ask about docking, compounds, targets..."):
     except Exception:
         snapshot_before = None
 
-    # Call Claude Code CLI with conversation context
+    # Call Claude Code CLI with streaming output
     with st.chat_message("assistant"):
-        with st.spinner("Claude is working..."):
+        # Build conversation context from recent messages
+        recent = st.session_state.messages[-10:]
+        if len(recent) > 1:
+            context_lines = []
+            for msg in recent[:-1]:
+                role = "User" if msg["role"] == "user" else "Assistant"
+                content = msg["content"][:500]
+                context_lines.append(f"{role}: {content}")
+            context = "\n".join(context_lines)
+            full_prompt = (
+                f"Previous conversation:\n{context}\n\n"
+                f"User: {prompt}"
+            )
+        else:
+            full_prompt = prompt
+
+        placeholder = st.empty()
+        response = ""
+        proc = None
+
+        try:
+            proc = subprocess.Popen(
+                ["claude", "-p", full_prompt,
+                 "--output-format", "stream-json", "--verbose",
+                 "--dangerously-skip-permissions"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                cwd=str(PROJECT_ROOT),
+            )
+
+            # Set a 30-minute watchdog
+            watchdog = threading.Timer(1800, lambda: proc.kill())
+            watchdog.start()
+
+            accumulated = []
             try:
-                # Build conversation context from recent messages
-                recent = st.session_state.messages[-10:]  # Last 10 messages
-                if len(recent) > 1:  # More than just the current message
-                    context_lines = []
-                    for msg in recent[:-1]:  # Exclude current (already in prompt)
-                        role = "User" if msg["role"] == "user" else "Assistant"
-                        content = msg["content"][:500]  # Truncate long messages
-                        context_lines.append(f"{role}: {content}")
-                    context = "\n".join(context_lines)
-                    full_prompt = (
-                        f"Previous conversation:\n{context}\n\n"
-                        f"User: {prompt}"
-                    )
-                else:
-                    full_prompt = prompt
-
-                result = subprocess.run(
-                    ["claude", "-p", full_prompt, "--output-format", "json",
-                     "--dangerously-skip-permissions"],
-                    capture_output=True,
-                    text=True,
-                    cwd=str(PROJECT_ROOT),
-                    timeout=300,
-                )
-                if result.returncode == 0:
+                for line in proc.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
                     try:
-                        data = json.loads(result.stdout)
-                        response = data.get("result", result.stdout)
+                        event = json.loads(line)
                     except json.JSONDecodeError:
-                        response = result.stdout
-                else:
-                    stderr = result.stderr[:500] if result.stderr else "Unknown error"
-                    response = f"Error: {stderr}"
-            except subprocess.TimeoutExpired:
-                response = "Request timed out (5 min limit). Try a simpler query."
-            except FileNotFoundError:
-                response = (
-                    "Claude Code CLI not found. "
-                    "Install: `npm install -g @anthropic-ai/claude-code`"
-                )
+                        continue
 
-        st.markdown(response)
+                    etype = event.get("type", "")
+
+                    # Extract text from assistant content chunks
+                    if etype == "assistant":
+                        for block in event.get("message", {}).get("content", []):
+                            if block.get("type") == "text":
+                                accumulated.append(block["text"])
+                                placeholder.markdown("".join(accumulated))
+
+                    # Final result — use as the definitive response
+                    elif etype == "result":
+                        result_text = event.get("result", "")
+                        if result_text:
+                            accumulated = [result_text]
+                            placeholder.markdown(result_text)
+            finally:
+                watchdog.cancel()
+
+            proc.wait(timeout=10)
+            response = "".join(accumulated)
+
+            if proc.returncode != 0 and not response:
+                response = "Claude returned an error. Try a simpler query."
+
+        except subprocess.TimeoutExpired:
+            if proc:
+                proc.kill()
+            partial = "".join(accumulated) if accumulated else ""
+            response = partial + ("\n\n---\n*Request timed out (30 min limit). Partial response shown above.*" if partial else "Request timed out (30 min limit). Try a simpler query.")
+        except FileNotFoundError:
+            response = (
+                "Claude Code CLI not found. "
+                "Install: `npm install -g @anthropic-ai/claude-code`"
+            )
+        finally:
+            if proc and proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+        if response:
+            placeholder.markdown(response)
 
         # ── Detect new DB records + images ─────────────────────────────
         artifacts = None

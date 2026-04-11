@@ -18,6 +18,7 @@ from components.database import (
     get_protein_by_pdb_id,
 )
 from components.charts import energy_bar_chart, admet_radar
+from components.file_viewer import render_file_panel, OutputFile
 
 # Ensure DB tables exist
 init_db()
@@ -502,10 +503,12 @@ if dock_result is not None:
                 st.error(f"Radar chart failed: {exc}")
 
     # Output file paths
-    with st.expander("Output File Paths", expanded=False):
-        st.code(f"Docked PDBQT: {dock_result.get('output_path', 'N/A')}")
-        st.code(f"Receptor:     {dock_result.get('receptor', 'N/A')}")
-        st.code(f"Ligand:       {dock_result.get('ligand', 'N/A')}")
+    with st.expander("Output Files", expanded=True):
+        render_file_panel([
+            OutputFile(dock_result["output_path"], role="docked"),
+            OutputFile(dock_result["receptor"], role="receptor"),
+            OutputFile(dock_result["ligand"], role="ligand"),
+        ], panel_id="dock_output")
 
 # ---------------------------------------------------------------------------
 # Footer
