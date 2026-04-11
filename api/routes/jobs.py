@@ -47,6 +47,7 @@ async def stream_job(job_id: str, request: Request):
 
             # Listen for new events with 5-minute timeout
             deadline = asyncio.get_event_loop().time() + 300
+            last_keepalive = asyncio.get_event_loop().time()
             while True:
                 remaining = deadline - asyncio.get_event_loop().time()
                 if remaining <= 0:
@@ -61,6 +62,10 @@ async def stream_job(job_id: str, request: Request):
                         timeout=2.0
                     )
                 except asyncio.TimeoutError:
+                    now = asyncio.get_event_loop().time()
+                    if now - last_keepalive >= 15:
+                        yield {"comment": "keepalive"}
+                        last_keepalive = now
                     continue
 
                 if message and message["type"] == "message":
