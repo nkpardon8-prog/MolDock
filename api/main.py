@@ -8,7 +8,7 @@ from api.auth import AuthMiddleware
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="MoleCopilot API", version="0.1.0")
+app = FastAPI(title="MoleCopilot API", version="0.1.0", redirect_slashes=False)
 
 app.add_middleware(AuthMiddleware)
 app.add_middleware(
