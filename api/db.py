@@ -320,7 +320,7 @@ def create_job(user_id: str, job_type: str, input_data: dict) -> dict:
         .insert({
             "user_id": user_id,
             "job_type": job_type,
-            "input_data": input_data,
+            "input": input_data,
             "status": "pending",
         })
         .execute()
