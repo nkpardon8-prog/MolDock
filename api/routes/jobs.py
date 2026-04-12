@@ -56,17 +56,14 @@ async def stream_job(job_id: str, request: Request):
                 if await request.is_disconnected():
                     return
 
-                try:
-                    message = await asyncio.wait_for(
-                        pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0),
-                        timeout=2.0
-                    )
-                except asyncio.TimeoutError:
-                    now = asyncio.get_event_loop().time()
-                    if now - last_keepalive >= 15:
-                        yield {"comment": "keepalive"}
-                        last_keepalive = now
-                    continue
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=1.0
+                )
+
+                now = asyncio.get_event_loop().time()
+                if now - last_keepalive >= 15:
+                    yield {"comment": "keepalive"}
+                    last_keepalive = now
 
                 if message and message["type"] == "message":
                     raw_str = message["data"] if isinstance(message["data"], str) else message["data"].decode()

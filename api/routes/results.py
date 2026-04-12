@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from api.config import settings
-from api.db import get_docking_run, get_docking_runs, get_protein_by_id
+from api.db import get_docking_run, get_docking_runs, get_protein_by_id, update_docking_run_interactions
 
 router = APIRouter(prefix="/results", tags=["results"])
 
@@ -87,5 +87,7 @@ def compute_interactions(request: Request, run_id: str):
         interactions = get_interactions(protein_pdb, ligand_path)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    update_docking_run_interactions(run_id, interactions)
 
     return interactions

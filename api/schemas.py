@@ -136,7 +136,8 @@ class ExportRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class OptimizeRequest(BaseModel):
-    smiles: str
+    smiles: Optional[str] = None
+    compound: Optional[str] = None
     property_name: Optional[str] = None
     num_molecules: int = Field(10, ge=1, le=50)
     min_similarity: float = Field(0.3, ge=0.0, le=1.0)

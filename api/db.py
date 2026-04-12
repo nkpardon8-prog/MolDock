@@ -46,7 +46,7 @@ def save_protein(
     if binding_site is not None:
         row["binding_site"] = binding_site
 
-    if existing.data:
+    if existing and existing.data:
         update_row = {k: v for k, v in row.items() if k != "created_by"}
         result = (
             _supabase.table("proteins")
@@ -68,7 +68,7 @@ def get_protein_by_pdb_id(pdb_id: str) -> Optional[dict]:
         .maybe_single()
         .execute()
     )
-    return result.data
+    return result.data if result else None
 
 
 def get_protein_by_id(protein_id: str) -> Optional[dict]:
@@ -79,7 +79,7 @@ def get_protein_by_id(protein_id: str) -> Optional[dict]:
         .maybe_single()
         .execute()
     )
-    return result.data
+    return result.data if result else None
 
 
 def get_all_proteins(limit: int = 20, offset: int = 0) -> list[dict]:
@@ -109,13 +109,14 @@ def save_compound(
 ) -> dict:
     existing = None
     if smiles:
-        existing = (
+        _res = (
             _supabase.table("compounds")
             .select("*")
             .eq("smiles", smiles)
             .maybe_single()
             .execute()
-        ).data
+        )
+        existing = _res.data if _res else None
 
     row: dict[str, Any] = {"created_by": created_by}
     if name is not None:
@@ -155,7 +156,7 @@ def get_compound_by_smiles(smiles: str) -> Optional[dict]:
         .maybe_single()
         .execute()
     )
-    return result.data
+    return result.data if result else None
 
 
 def get_all_compounds(limit: int = 20, offset: int = 0) -> list[dict]:
@@ -218,7 +219,7 @@ def get_docking_runs(
     energy_min: Optional[float] = None,
     energy_max: Optional[float] = None,
 ) -> list[dict]:
-    query = _supabase.table("docking_runs").select("*")
+    query = _supabase.table("docking_runs").select("*, proteins(pdb_id, title), compounds(name, smiles)")
     if protein_id:
         query = query.eq("protein_id", protein_id)
     if energy_min is not None:
@@ -237,7 +238,7 @@ def get_docking_run(run_id: str) -> Optional[dict]:
         .maybe_single()
         .execute()
     )
-    return result.data
+    return result.data if result else None
 
 
 def get_recent_docking_runs(limit: int = 10) -> list[dict]:
@@ -249,6 +250,16 @@ def get_recent_docking_runs(limit: int = 10) -> list[dict]:
         .execute()
     )
     return result.data
+
+
+def update_docking_run_interactions(run_id: str, interactions: dict) -> dict:
+    result = (
+        _supabase.table("docking_runs")
+        .update({"interactions": interactions})
+        .eq("id", run_id)
+        .execute()
+    )
+    return result.data[0]
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +373,7 @@ def get_job(job_id: str) -> Optional[dict]:
         .maybe_single()
         .execute()
     )
-    return result.data
+    return result.data if result else None
 
 
 def verify_session_owner(session_id: str, user_id: str) -> dict:
@@ -374,7 +385,7 @@ def verify_session_owner(session_id: str, user_id: str) -> dict:
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise ValueError("Session not found")
     if result.data.get("user_id") != user_id:
         raise ValueError("Not authorized")
@@ -390,7 +401,7 @@ def verify_job_owner(job_id: str, user_id: str) -> dict:
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise ValueError("Job not found")
     if result.data.get("user_id") != user_id:
         raise ValueError("Not authorized")
@@ -406,7 +417,7 @@ def verify_literature_owner(search_id: str, user_id: str) -> dict:
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise ValueError("Search not found")
     if result.data.get("user_id") != user_id:
         raise ValueError("Not authorized")
@@ -464,7 +475,7 @@ def get_literature_search(search_id: str) -> Optional[dict]:
         .maybe_single()
         .execute()
     )
-    return result.data
+    return result.data if result else None
 
 
 def update_literature_search(
