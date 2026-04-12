@@ -103,8 +103,10 @@ function FileCard({ file }: { file: FileEntry }) {
       setView3D(false);
       return;
     }
-    await fetchContent();
-    setView3D(true);
+    const content = await fetchContent();
+    if (content) {
+      setView3D(true);
+    }
   }, [view3D, fetchContent]);
 
   return (

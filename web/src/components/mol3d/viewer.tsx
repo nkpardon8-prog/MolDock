@@ -59,15 +59,18 @@ export default function Mol3DViewer({
       })
       viewerRef.current = viewer
 
+      let modelIndex = 0
+
       if (proteinContent) {
         viewer.addModel(proteinContent, 'pdb')
-        viewer.setStyle({ model: 0 }, { [style]: { color: 'spectrum' } })
+        viewer.setStyle({ model: modelIndex }, { [style]: { color: 'spectrum' } })
+        modelIndex++
       }
 
       if (ligandContent) {
         viewer.addModel(ligandContent, 'pdb')
         viewer.setStyle(
-          { model: 1 },
+          { model: modelIndex },
           { stick: { colorscheme: 'greenCarbon', radius: 0.2 } }
         )
       }
