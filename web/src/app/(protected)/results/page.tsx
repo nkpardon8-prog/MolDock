@@ -81,13 +81,19 @@ export default function ResultsPage() {
 
   const { data: proteins } = useQuery({
     queryKey: ['proteins'],
-    queryFn: () => apiGet<Protein[]>('/api/proteins'),
+    queryFn: async () => {
+      const res = await apiGet<{ items: Protein[] }>('/api/proteins')
+      return res.items ?? []
+    },
   })
 
   const queryString = buildQueryString(appliedFilters)
   const { data: runs, isLoading: runsLoading, error: runsError } = useQuery({
     queryKey: ['results', queryString],
-    queryFn: () => apiGet<DockingRun[]>(`/api/results?${queryString}`),
+    queryFn: async () => {
+      const res = await apiGet<{ items: DockingRun[] }>(`/api/results?${queryString}`)
+      return res.items ?? []
+    },
   })
 
   const { data: runDetail, isLoading: detailLoading } = useQuery({

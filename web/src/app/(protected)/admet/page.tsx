@@ -398,7 +398,10 @@ function BatchModeTab() {
 function CompareTab() {
   const { data: compounds, isLoading } = useQuery({
     queryKey: ['compounds'],
-    queryFn: () => apiGet<Compound[]>('/api/compounds'),
+    queryFn: async () => {
+      const res = await apiGet<{ items: Compound[] }>('/api/compounds')
+      return res.items ?? []
+    },
   })
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])

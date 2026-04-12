@@ -77,8 +77,8 @@ export default function LiteraturePage() {
   const fetchSaved = useCallback(async () => {
     setSavedLoading(true)
     try {
-      const data = await apiGet<LiteratureSearch[]>('/api/literature/searches')
-      setSavedSearches(data)
+      const res = await apiGet<{ items: LiteratureSearch[] }>('/api/literature/searches')
+      setSavedSearches(res.items ?? [])
     } catch {
       // silent
     } finally {
