@@ -107,10 +107,17 @@ def run_dock_job(job_id: str, params: dict):
         result_data = {
             "run_id": run["id"],
             "best_energy": dock_result["best_energy"],
+            "all_energies": dock_result.get("all_energies", []),
             "n_poses": dock_result["n_poses"],
             "compound": compound_name,
             "protein": params["pdb_id"],
+            "output_path": dock_result.get("output_path"),
+            "receptor_path": dock_result.get("receptor"),
+            "ligand_path": dock_result.get("ligand"),
             "admet": admet_result,
+            "drug_likeness_score": admet_result.get("drug_likeness_score"),
+            "sa_score": admet_result.get("sa_score"),
+            "sa_assessment": admet_result.get("synthetic_assessment"),
         }
         update_job(job_id, status="complete", result=result_data)
         _publish_and_buffer(r, job_id, "complete", result_data)
