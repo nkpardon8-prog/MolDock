@@ -147,20 +147,50 @@ function SingleCompoundTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {PROPERTY_ROWS.map((row) => {
+                    {PROPERTY_ROWS.map((row, idx) => {
                       const val = result[row.key] as number | null | undefined
                       const pass = val != null && row.threshold !== '-' ? row.check(val) : null
+                      const lipinski = result?.lipinski as Record<string, unknown> | undefined
+                      const veber = result?.veber as Record<string, unknown> | undefined
+                      const lipViolations = lipinski?.violations as number | undefined
+                      const veberViolations = veber?.violations as number | undefined
+                      const isLastLipinski = idx === 3
+                      const isLastVeber = idx === 5
                       return (
-                        <tr key={row.key} className="border-b border-[#2A2F3E]/50">
-                          <td className="py-2 pr-4 text-[#FAFAFA]">{row.label}</td>
-                          <td className="py-2 pr-4 text-[#FAFAFA] font-mono">{formatNum(val)}</td>
-                          <td className="py-2 pr-4 text-[#8B949E]">{row.threshold}</td>
-                          <td className="py-2">
-                            {pass === true && <Badge variant="default" className="bg-[#00D4AA]/20 text-[#00D4AA]">Pass</Badge>}
-                            {pass === false && <Badge variant="destructive">Fail</Badge>}
-                            {pass === null && <span className="text-[#8B949E]">-</span>}
-                          </td>
-                        </tr>
+                        <>
+                          <tr key={row.key} className="border-b border-[#2A2F3E]/50">
+                            <td className="py-2 pr-4 text-[#FAFAFA]">{row.label}</td>
+                            <td className="py-2 pr-4 text-[#FAFAFA] font-mono">{formatNum(val)}</td>
+                            <td className="py-2 pr-4 text-[#8B949E]">{row.threshold}</td>
+                            <td className="py-2">
+                              {pass === true && <Badge variant="default" className="bg-[#00D4AA]/20 text-[#00D4AA]">Pass</Badge>}
+                              {pass === false && <Badge variant="destructive">Fail</Badge>}
+                              {pass === null && <span className="text-[#8B949E]">-</span>}
+                            </td>
+                          </tr>
+                          {isLastLipinski && lipViolations != null && (
+                            <tr key="lipinski-summary" className="border-b border-[#2A2F3E]">
+                              <td colSpan={3} className="py-2 pr-4 font-medium" style={{ color: lipViolations === 0 ? '#00D4AA' : lipViolations === 1 ? '#FFD700' : '#FF4B4B' }}>
+                                Lipinski: {4 - lipViolations}/4 rules passed ({lipViolations} violation{lipViolations !== 1 ? 's' : ''})
+                              </td>
+                              <td className="py-2">
+                                {(lipinski?.passes as boolean | undefined) === true && <Badge variant="default" className="bg-[#00D4AA]/20 text-[#00D4AA]">Pass</Badge>}
+                                {(lipinski?.passes as boolean | undefined) === false && <Badge variant="destructive">Fail</Badge>}
+                              </td>
+                            </tr>
+                          )}
+                          {isLastVeber && veberViolations != null && (
+                            <tr key="veber-summary" className="border-b border-[#2A2F3E]">
+                              <td colSpan={3} className="py-2 pr-4 font-medium" style={{ color: veberViolations === 0 ? '#00D4AA' : veberViolations === 1 ? '#FFD700' : '#FF4B4B' }}>
+                                Veber: {2 - veberViolations}/2 rules passed ({veberViolations} violation{veberViolations !== 1 ? 's' : ''})
+                              </td>
+                              <td className="py-2">
+                                {(veber?.passes as boolean | undefined) === true && <Badge variant="default" className="bg-[#00D4AA]/20 text-[#00D4AA]">Pass</Badge>}
+                                {(veber?.passes as boolean | undefined) === false && <Badge variant="destructive">Fail</Badge>}
+                              </td>
+                            </tr>
+                          )}
+                        </>
                       )
                     })}
                   </tbody>

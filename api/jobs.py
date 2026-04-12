@@ -50,15 +50,21 @@ def run_dock_job(job_id: str, params: dict):
         from core.utils import validate_smiles
         from core.fetch_compounds import search_pubchem, smiles_to_sdf
         compound_input = params.get("compound_input", "")
+        compound_cid = None
+        iupac_name = None
+        compound_formula = None
         if validate_smiles(compound_input):
             smiles = compound_input
             compound_name = compound_input[:30]
         else:
-            results = search_pubchem(compound_input, max_results=1)
-            if not results:
+            search_results = search_pubchem(compound_input, max_results=1)
+            if not search_results:
                 raise ValueError(f"Compound not found: {compound_input}")
-            smiles = results[0]["smiles"]
-            compound_name = results[0].get("name", compound_input)
+            smiles = search_results[0]["smiles"]
+            compound_name = search_results[0].get("name", compound_input)
+            compound_cid = search_results[0].get("cid")
+            iupac_name = search_results[0].get("iupac_name")
+            compound_formula = search_results[0].get("formula")
 
         # Step 5: Prepare ligand
         _publish_and_buffer(r, job_id, "progress", {"step": "Preparing ligand...", "step_num": 5})
@@ -95,6 +101,7 @@ def run_dock_job(job_id: str, params: dict):
         )["id"]
         compound_id = save_compound(
             created_by=user_id, name=compound_name, smiles=smiles,
+            cid=str(compound_cid) if compound_cid else None,
             admet=admet_result, drug_likeness_score=admet_result.get("drug_likeness_score"),
         )["id"]
         run = save_docking_run(
@@ -108,12 +115,19 @@ def run_dock_job(job_id: str, params: dict):
             "run_id": run["id"],
             "best_energy": dock_result["best_energy"],
             "all_energies": dock_result.get("all_energies", []),
+            "all_poses": dock_result.get("all_poses", []),
             "n_poses": dock_result["n_poses"],
             "compound": compound_name,
             "protein": params["pdb_id"],
+            "smiles": smiles,
+            "compound_cid": compound_cid,
+            "iupac_name": iupac_name,
+            "formula": compound_formula,
             "output_path": dock_result.get("output_path"),
             "receptor_path": dock_result.get("receptor"),
             "ligand_path": dock_result.get("ligand"),
+            "protein_info": protein_info,
+            "binding_site": binding_site,
             "admet": admet_result,
             "drug_likeness_score": admet_result.get("drug_likeness_score"),
             "sa_score": admet_result.get("sa_score"),
