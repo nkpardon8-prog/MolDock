@@ -215,6 +215,12 @@ export default function DockPage() {
                 {pdbId && proteinQuery !== pdbId && (
                   <p className="mt-1 text-xs text-[#00D4AA] font-mono">PDB: {pdbId}</p>
                 )}
+                {!pdbId && proteinQuery.trim().length >= 2 && !showDropdown && !searchLoading && searchResults.length === 0 && (
+                  <p className="mt-1 text-xs text-[#8B949E]">No results found. Try a different name or enter a 4-character PDB ID directly.</p>
+                )}
+                {!pdbId && proteinQuery.trim().length >= 2 && !showDropdown && !searchLoading && searchResults.length > 0 && (
+                  <p className="mt-1 text-xs text-amber-400">Select a protein from the results above</p>
+                )}
                 {showDropdown && searchResults.length > 0 && (
                   <div className="absolute z-50 mt-1 w-full rounded-lg border border-[#2A2F3E] bg-[#1A1F2E] shadow-xl max-h-64 overflow-auto">
                     {searchResults.map((r) => (
