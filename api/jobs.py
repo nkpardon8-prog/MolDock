@@ -1,5 +1,6 @@
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from celery import Celery
 import redis
@@ -90,8 +91,53 @@ def run_dock_job(job_id: str, params: dict):
         from core.admet_check import full_admet
         admet_result = full_admet(smiles)
 
-        # Save to Supabase
+        # Step 8: Enrichment (best-effort, never blocks result)
+        _publish_and_buffer(r, job_id, "progress", {"step": "Enriching with external databases...", "step_num": 8})
+
+        admetlab_data = None
+        uniprot_data = None
+        target_summary = None
+
         protein_info = get_protein_info(params["pdb_id"])
+
+        def _enrich_admetlab():
+            try:
+                from core.admet_check import admetlab_profile
+                return admetlab_profile(smiles)
+            except Exception:
+                return None
+
+        def _enrich_protein_context():
+            _uniprot = None
+            _target = None
+            try:
+                accession = protein_info.get("uniprot_accession")
+                if accession:
+                    from core.literature import get_uniprot_info, get_target_summary
+                    _uniprot = get_uniprot_info(uniprot_id=accession)
+                    _target = get_target_summary(accession)
+            except Exception:
+                pass
+            return _uniprot, _target
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_admet = executor.submit(_enrich_admetlab)
+                future_protein = executor.submit(_enrich_protein_context)
+
+                try:
+                    admetlab_data = future_admet.result(timeout=60)
+                except Exception:
+                    pass
+
+                try:
+                    uniprot_data, target_summary = future_protein.result(timeout=60)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Save to Supabase
         user_id = params.get("user_id")
         protein_id = save_protein(
             created_by=user_id, pdb_id=params["pdb_id"],
@@ -132,6 +178,9 @@ def run_dock_job(job_id: str, params: dict):
             "drug_likeness_score": admet_result.get("drug_likeness_score"),
             "sa_score": admet_result.get("sa_score"),
             "sa_assessment": admet_result.get("synthetic_assessment"),
+            "uniprot": uniprot_data,
+            "target_summary": target_summary,
+            "admetlab": admetlab_data,
         }
         update_job(job_id, status="complete", result=result_data)
         _publish_and_buffer(r, job_id, "complete", result_data)

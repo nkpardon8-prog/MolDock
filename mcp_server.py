@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MoleCopilot MCP Server — Molecular Docking Research Agent.
 
-Exposes 22 tools for computational drug discovery via the Model Context Protocol.
+Exposes 26 tools for computational drug discovery via the Model Context Protocol.
 Uses FastMCP for automatic schema generation from type hints.
 All heavy imports are lazy (inside tool functions) for fast startup.
 Every tool that produces artifacts saves to SQLite for dashboard persistence.
@@ -510,7 +510,7 @@ def synthetic_check(smiles: str) -> dict:
 
 
 # ============================================================
-# DATABASE QUERIES (4 tools)
+# DATABASE QUERIES (5 tools)
 # ============================================================
 
 @mcp.tool()
@@ -527,6 +527,18 @@ def search_compounds(query: str, max_results: int = 20) -> dict:
     Example: 'aspirin', 'thymoquinone', 'exemestane'."""
     from core.fetch_compounds import search_pubchem
     return {"compounds": search_pubchem(query, max_results)}
+
+
+@mcp.tool()
+def search_natural_products(query: str, search_type: str = "name", max_results: int = 20) -> dict:
+    """Search the Natural Products Atlas database for natural product compounds.
+    search_type can be 'name' (text search) or 'similarity' (SMILES-based Tanimoto search)."""
+    from core.fetch_compounds import search_npatlas, search_npatlas_similar
+    if search_type == "similarity":
+        results = search_npatlas_similar(query, max_results=max_results)
+    else:
+        results = search_npatlas(query, max_results=max_results)
+    return {"results": results, "count": len(results), "search_type": search_type}
 
 
 @mcp.tool()
@@ -563,7 +575,8 @@ def draw_molecule(smiles: str, name: str = None) -> dict:
 @mcp.tool()
 def protein_info(pdb_id: str = None, uniprot_id: str = None, protein_name: str = None) -> dict:
     """Get detailed protein information from RCSB PDB and/or UniProt.
-    Returns annotations, domains, organism, known structures, disease associations."""
+    Returns annotations, domains, organism, known structures, disease associations,
+    and ChEMBL target summary (bioactivity statistics) when a UniProt accession is available."""
     result = {}
     if pdb_id:
         from core.fetch_pdb import get_protein_info
@@ -573,6 +586,20 @@ def protein_info(pdb_id: str = None, uniprot_id: str = None, protein_name: str =
         result["uniprot"] = get_uniprot_info(uniprot_id, protein_name)
     if not result:
         raise ValueError("Provide pdb_id, uniprot_id, or protein_name")
+
+    # Best-effort ChEMBL target summary when a UniProt accession is known
+    resolved_uniprot = uniprot_id
+    if not resolved_uniprot and result.get("pdb"):
+        resolved_uniprot = result["pdb"].get("uniprot_accession")
+    if resolved_uniprot:
+        try:
+            from core.literature import get_target_summary
+            summary = get_target_summary(resolved_uniprot)
+            if summary:
+                result["target_summary"] = summary
+        except Exception:
+            pass
+
     return result
 
 

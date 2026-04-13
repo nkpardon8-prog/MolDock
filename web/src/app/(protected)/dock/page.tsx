@@ -32,6 +32,35 @@ function bindingQuality(energy: number): { label: string; color: string } {
   return { label: 'Weak', color: '#FF4B4B' }
 }
 
+function qualityColor(metric: string, value: number): string {
+  if (metric === 'r_free') {
+    if (value < 0.25) return '#00D4AA'
+    if (value <= 0.35) return '#FFD700'
+    return '#FF4B4B'
+  }
+  if (metric === 'clashscore') {
+    if (value < 10) return '#00D4AA'
+    if (value <= 20) return '#FFD700'
+    return '#FF4B4B'
+  }
+  if (metric === 'rama') {
+    if (value < 1) return '#00D4AA'
+    if (value <= 5) return '#FFD700'
+    return '#FF4B4B'
+  }
+  return '#8B949E'
+}
+
+interface NpAtlasResult {
+  npaid?: string
+  original_name?: string
+  name?: string
+  smiles?: string
+  inchikey?: string
+  organism?: string
+  origin_organism?: { genus?: string; species?: string }
+}
+
 export default function DockPage() {
   const [pdbId, setPdbId] = useState('')
   const [proteinQuery, setProteinQuery] = useState('')
@@ -46,6 +75,15 @@ export default function DockPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [proteinInfoOpen, setProteinInfoOpen] = useState(true)
   const [bindingSiteOpen, setBindingSiteOpen] = useState(true)
+  const [targetBioOpen, setTargetBioOpen] = useState(true)
+  const [knownActivesOpen, setKnownActivesOpen] = useState(true)
+  const [extAdmetOpen, setExtAdmetOpen] = useState(false)
+
+  const [npAtlasOpen, setNpAtlasOpen] = useState(false)
+  const [npAtlasQuery, setNpAtlasQuery] = useState('')
+  const [npAtlasBySimilarity, setNpAtlasBySimilarity] = useState(false)
+  const [npAtlasResults, setNpAtlasResults] = useState<NpAtlasResult[]>([])
+  const [npAtlasLoading, setNpAtlasLoading] = useState(false)
 
   const { status, progress, result, error } = useJobStream(jobId)
 
@@ -70,6 +108,10 @@ export default function DockPage() {
   const compoundCid = resultData?.compound_cid as number | undefined
   const iupacName = resultData?.iupac_name as string | undefined
   const formula = resultData?.formula as string | undefined
+
+  const uniprot = resultData?.uniprot as Record<string, unknown> | undefined
+  const targetSummary = resultData?.target_summary as Record<string, unknown> | undefined
+  const admetlab = resultData?.admetlab as Record<string, unknown> | undefined
 
   const isPdbId = (s: string) => /^[A-Za-z0-9]{4}$/.test(s.trim())
 
@@ -119,6 +161,31 @@ export default function DockPage() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  useEffect(() => {
+    if (!npAtlasOpen || npAtlasQuery.trim().length < 2) {
+      setNpAtlasResults([])
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setNpAtlasLoading(true)
+      try {
+        const res = await apiPost<{ results: NpAtlasResult[] }>('/api/compounds/search-npatlas', {
+          query: npAtlasQuery.trim(),
+          search_type: npAtlasBySimilarity ? 'similarity' : 'name',
+          max_results: 8,
+        })
+        setNpAtlasResults(res.results ?? [])
+      } catch {
+        setNpAtlasResults([])
+      } finally {
+        setNpAtlasLoading(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [npAtlasQuery, npAtlasBySimilarity, npAtlasOpen])
 
   const handleSelectProtein = useCallback((result: { pdb_id: string; title: string }) => {
     setPdbId(result.pdb_id)
@@ -257,6 +324,69 @@ export default function DockPage() {
                 disabled={isRunning}
                 className="border-[#2A2F3E] bg-[#0E1117] text-[#FAFAFA]"
               />
+              <button
+                type="button"
+                onClick={() => { setNpAtlasOpen(!npAtlasOpen); setNpAtlasQuery(''); setNpAtlasResults([]); }}
+                className="text-xs text-[#00D4AA] hover:underline"
+              >
+                {npAtlasOpen ? 'Close NP Atlas' : 'Search NP Atlas'}
+              </button>
+              {npAtlasOpen && (
+                <div className="mt-2 rounded-lg border border-[#2A2F3E] bg-[#0E1117] p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder={npAtlasBySimilarity ? 'Enter SMILES...' : 'Compound name...'}
+                      value={npAtlasQuery}
+                      onChange={(e) => setNpAtlasQuery(e.target.value)}
+                      className="border-[#2A2F3E] bg-[#1A1F2E] text-[#FAFAFA] text-xs h-8"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { setNpAtlasBySimilarity(!npAtlasBySimilarity); setNpAtlasQuery(''); setNpAtlasResults([]); }}
+                      className={`text-xs h-8 shrink-0 border-[#2A2F3E] ${npAtlasBySimilarity ? 'bg-[#00D4AA]/15 text-[#00D4AA]' : 'bg-transparent text-[#8B949E]'}`}
+                    >
+                      By Similarity
+                    </Button>
+                  </div>
+                  {npAtlasLoading && (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-[#8B949E] border-t-[#00D4AA]" />
+                      <span className="text-xs text-[#8B949E]">Searching NP Atlas...</span>
+                    </div>
+                  )}
+                  {npAtlasResults.length > 0 && (
+                    <div className="max-h-48 overflow-auto space-y-1">
+                      {npAtlasResults.map((np, i) => (
+                        <button
+                          key={np.npaid ?? i}
+                          type="button"
+                          onClick={() => {
+                            if (np.smiles) setCompound(np.smiles)
+                            setNpAtlasOpen(false)
+                            setNpAtlasQuery('')
+                            setNpAtlasResults([])
+                          }}
+                          className="w-full text-left px-2 py-1.5 rounded hover:bg-[#2A2F3E] transition-colors"
+                        >
+                          <p className="text-xs text-[#FAFAFA] font-medium">{np.original_name ?? np.name ?? np.npaid ?? 'Unknown'}</p>
+                          {(np.organism || np.origin_organism) && (
+                            <p className="text-[10px] text-[#8B949E] italic">
+                              {np.organism || [np.origin_organism?.genus, np.origin_organism?.species].filter(Boolean).join(' ')}
+                            </p>
+                          )}
+                          {np.smiles && (
+                            <p className="text-[10px] text-[#8B949E] font-mono truncate">{np.smiles.length > 60 ? np.smiles.slice(0, 60) + '...' : np.smiles}</p>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!npAtlasLoading && npAtlasQuery.trim().length >= 2 && npAtlasResults.length === 0 && (
+                    <p className="text-xs text-[#8B949E] py-1">No results found.</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2 sm:col-span-2">
@@ -351,9 +481,21 @@ export default function DockPage() {
               </CardHeader>
               {proteinInfoOpen && (
                 <CardContent>
-                  {proteinInfo.title != null && (
-                    <h3 className="mb-3 text-sm font-semibold text-[#FAFAFA]">{String(proteinInfo.title)}</h3>
-                  )}
+                  <div className="mb-3 flex items-center gap-2 flex-wrap">
+                    {proteinInfo.title != null && (
+                      <h3 className="text-sm font-semibold text-[#FAFAFA]">{String(proteinInfo.title)}</h3>
+                    )}
+                    {proteinInfo.gene_name != null && (
+                      <Badge variant="secondary" className="bg-[#00D4AA]/15 text-[#00D4AA] border border-[#00D4AA]/30 text-xs">
+                        {String(proteinInfo.gene_name)}
+                      </Badge>
+                    )}
+                    {proteinInfo.ec_number != null && (
+                      <Badge variant="outline" className="border-[#2A2F3E] text-[#8B949E] text-xs">
+                        EC {String(proteinInfo.ec_number)}
+                      </Badge>
+                    )}
+                  </div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     {proteinInfo.organism != null && (
                       <div>
@@ -380,6 +522,36 @@ export default function DockPage() {
                       </div>
                     )}
                   </div>
+
+                  {(proteinInfo.r_free != null || proteinInfo.clashscore != null || proteinInfo.ramachandran_outliers_pct != null) && (
+                    <div className="mt-3 grid grid-cols-3 gap-3">
+                      {proteinInfo.r_free != null && (
+                        <div>
+                          <p className="text-xs text-[#8B949E]">R-free</p>
+                          <p className="text-sm font-mono" style={{ color: qualityColor('r_free', Number(proteinInfo.r_free)) }}>
+                            {Number(proteinInfo.r_free).toFixed(3)}
+                          </p>
+                        </div>
+                      )}
+                      {proteinInfo.clashscore != null && (
+                        <div>
+                          <p className="text-xs text-[#8B949E]">Clashscore</p>
+                          <p className="text-sm font-mono" style={{ color: qualityColor('clashscore', Number(proteinInfo.clashscore)) }}>
+                            {Number(proteinInfo.clashscore).toFixed(1)}
+                          </p>
+                        </div>
+                      )}
+                      {proteinInfo.ramachandran_outliers_pct != null && (
+                        <div>
+                          <p className="text-xs text-[#8B949E]">Ramachandran Outliers</p>
+                          <p className="text-sm font-mono" style={{ color: qualityColor('rama', Number(proteinInfo.ramachandran_outliers_pct)) }}>
+                            {Number(proteinInfo.ramachandran_outliers_pct).toFixed(1)}%
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {Array.isArray(proteinInfo.ligands) && proteinInfo.ligands.length > 0 && (
                     <div className="mt-3">
                       <p className="mb-1.5 text-xs text-[#8B949E]">Co-crystallized Ligands</p>
@@ -392,6 +564,33 @@ export default function DockPage() {
                       </div>
                     </div>
                   )}
+
+                  {Array.isArray(proteinInfo.binding_affinity) && proteinInfo.binding_affinity.length > 0 && (
+                    <div className="mt-3">
+                      <p className="mb-1.5 text-xs text-[#8B949E]">Known Binding Affinity</p>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-[#2A2F3E] text-[#8B949E]">
+                            <th className="pb-1.5 text-left font-medium text-xs">Type</th>
+                            <th className="pb-1.5 text-left font-medium text-xs">Value</th>
+                            <th className="pb-1.5 text-left font-medium text-xs">Unit</th>
+                            <th className="pb-1.5 text-left font-medium text-xs">Ligand</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-[#FAFAFA]">
+                          {(proteinInfo.binding_affinity as Array<Record<string, unknown>>).map((ba, i) => (
+                            <tr key={i} className="border-b border-[#2A2F3E]/50">
+                              <td className="py-1 text-xs">{String(ba.type ?? '--')}</td>
+                              <td className="py-1 text-xs font-mono">{ba.value != null ? String(ba.value) : '--'}</td>
+                              <td className="py-1 text-xs">{String(ba.unit ?? '--')}</td>
+                              <td className="py-1 text-xs font-mono">{String(ba.comp_id ?? '--')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
                   {proteinInfo.citation != null && typeof proteinInfo.citation === 'object' && (
                     <div className="mt-3 rounded border border-[#2A2F3E] bg-[#0E1117] p-2.5">
                       <p className="text-xs text-[#8B949E]">Citation</p>
@@ -415,6 +614,121 @@ export default function DockPage() {
                           DOI: {String((proteinInfo.citation as Record<string, unknown>).doi)}
                         </a>
                       )}
+                    </div>
+                  )}
+                </CardContent>
+              )}
+            </Card>
+          )}
+
+          {uniprot && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader
+                className="cursor-pointer select-none"
+                onClick={() => setTargetBioOpen(!targetBioOpen)}
+              >
+                <div className="flex items-center gap-2">
+                  {targetBioOpen
+                    ? <ChevronDown className="h-4 w-4 text-[#8B949E]" />
+                    : <ChevronRight className="h-4 w-4 text-[#8B949E]" />}
+                  <CardTitle className="text-sm text-[#FAFAFA]">Target Biology</CardTitle>
+                </div>
+              </CardHeader>
+              {targetBioOpen && (
+                <CardContent className="space-y-3">
+                  {uniprot.function != null && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1">Function</p>
+                      <p className="text-sm text-[#FAFAFA]">{String(uniprot.function)}</p>
+                    </div>
+                  )}
+
+                  {Array.isArray(uniprot.active_sites) && (uniprot.active_sites as Array<Record<string, unknown>>).length > 0 && (
+                    <div>
+                      <p className="mb-1.5 text-xs text-[#8B949E]">Active Site Residues</p>
+                      <div className="flex flex-wrap gap-1">
+                        {(uniprot.active_sites as Array<Record<string, unknown>>).map((site, i) => (
+                          <Badge key={i} variant="outline" className="border-[#2A2F3E] text-[#8B949E] text-[10px] font-mono px-1.5 py-0">
+                            {site.position != null ? String(site.position) : '?'}{site.description ? ` - ${String(site.description)}` : ''}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {Array.isArray(uniprot.catalytic_activity) && (uniprot.catalytic_activity as string[]).length > 0 && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1">Catalytic Activity</p>
+                      <p className="text-sm text-[#FAFAFA]">{(uniprot.catalytic_activity as string[])[0]}</p>
+                    </div>
+                  )}
+
+                  {Array.isArray(uniprot.disease_associations) && (uniprot.disease_associations as string[]).length > 0 && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1">Disease Associations</p>
+                      <ul className="space-y-1">
+                        {(uniprot.disease_associations as string[]).map((d, i) => (
+                          <li key={i} className="text-sm text-[#FAFAFA]">{d}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {uniprot.tissue_specificity != null && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1">Tissue Specificity</p>
+                      <p className="text-sm text-[#FAFAFA]">{String(uniprot.tissue_specificity)}</p>
+                    </div>
+                  )}
+                </CardContent>
+              )}
+            </Card>
+          )}
+
+          {targetSummary && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader
+                className="cursor-pointer select-none"
+                onClick={() => setKnownActivesOpen(!knownActivesOpen)}
+              >
+                <div className="flex items-center gap-2">
+                  {knownActivesOpen
+                    ? <ChevronDown className="h-4 w-4 text-[#8B949E]" />
+                    : <ChevronRight className="h-4 w-4 text-[#8B949E]" />}
+                  <CardTitle className="text-sm text-[#FAFAFA]">Known Actives Benchmark</CardTitle>
+                </div>
+              </CardHeader>
+              {knownActivesOpen && (
+                <CardContent className="space-y-3">
+                  {targetSummary.total_compounds_tested != null && (
+                    <p className="text-sm text-[#FAFAFA]">
+                      <span className="font-mono text-[#00D4AA] font-semibold">{String(targetSummary.total_compounds_tested)}</span>{' '}
+                      compounds tested in ChEMBL
+                    </p>
+                  )}
+                  {targetSummary.best_ic50_nm != null && (
+                    <p className="text-sm text-[#FAFAFA]">
+                      Best IC50: <span className="font-mono text-[#00D4AA] font-semibold">{Number(targetSummary.best_ic50_nm).toFixed(1)} nM</span>
+                      {targetSummary.best_ic50_compound != null && (
+                        <span className="text-[#8B949E]"> ({String(targetSummary.best_ic50_compound)})</span>
+                      )}
+                    </p>
+                  )}
+                  {Array.isArray(targetSummary.approved_drugs) && (targetSummary.approved_drugs as Array<Record<string, unknown>>).length > 0 && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1.5">Approved Drugs</p>
+                      <div className="space-y-1.5">
+                        {(targetSummary.approved_drugs as Array<Record<string, unknown>>).map((drug, i) => (
+                          <div key={i} className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm text-[#FAFAFA]">{String(drug.name ?? '--')}</span>
+                            {drug.mechanism != null && (
+                              <Badge variant="secondary" className="bg-[#00D4AA]/15 text-[#00D4AA] border border-[#00D4AA]/30 text-[10px]">
+                                {String(drug.mechanism)}
+                              </Badge>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </CardContent>
@@ -621,6 +935,127 @@ export default function DockPage() {
                 </CardContent>
               </Card>
             </div>
+          )}
+
+          {admetlab != null && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader
+                className="cursor-pointer select-none"
+                onClick={() => setExtAdmetOpen(!extAdmetOpen)}
+              >
+                <div className="flex items-center gap-2">
+                  {extAdmetOpen
+                    ? <ChevronDown className="h-4 w-4 text-[#8B949E]" />
+                    : <ChevronRight className="h-4 w-4 text-[#8B949E]" />}
+                  <CardTitle className="text-sm text-[#FAFAFA]">Extended ADMET</CardTitle>
+                  <span className="text-[10px] text-[#8B949E]">(ADMETlab 3.0)</span>
+                </div>
+              </CardHeader>
+              {extAdmetOpen && (
+                <CardContent className="space-y-4">
+                  <div>
+                    <p className="text-xs text-[#8B949E] mb-1.5">CYP Inhibition</p>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-[#2A2F3E] text-[#8B949E]">
+                          <th className="pb-1.5 text-left font-medium text-xs">Enzyme</th>
+                          <th className="pb-1.5 text-left font-medium text-xs">Prediction</th>
+                          <th className="pb-1.5 text-left font-medium text-xs">Probability</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-[#FAFAFA]">
+                        {(['CYP1A2', 'CYP2C9', 'CYP2C19', 'CYP2D6', 'CYP3A4'] as const).map((enzyme) => {
+                          const key = `${enzyme}_inhibitor` as string
+                          const val = (admetlab as Record<string, unknown>)[key]
+                          const probKey = `${key}_prob` as string
+                          const prob = (admetlab as Record<string, unknown>)[probKey]
+                          return (
+                            <tr key={enzyme} className="border-b border-[#2A2F3E]/50">
+                              <td className="py-1 text-xs font-mono">{enzyme}</td>
+                              <td className="py-1 text-xs">
+                                {val != null ? (
+                                  <span className={Number(val) === 1 ? 'text-[#FF4B4B]' : 'text-[#00D4AA]'}>
+                                    {Number(val) === 1 ? 'Inhibitor' : 'Non-inhibitor'}
+                                  </span>
+                                ) : '--'}
+                              </td>
+                              <td className="py-1 text-xs font-mono">{prob != null ? Number(prob).toFixed(2) : '--'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-[#8B949E] mb-1.5">Cardiotoxicity</p>
+                    {(() => {
+                      const herg = (admetlab as Record<string, unknown>)?.hERG_inhibitor ?? (admetlab as Record<string, unknown>)?.['hERG_inhibitor']
+                      return (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-[#FAFAFA]">hERG Inhibition:</span>
+                          {herg != null ? (
+                            <Badge
+                              variant="secondary"
+                              className={Number(herg) === 1
+                                ? 'bg-red-500/15 text-[#FF4B4B] border border-red-500/30'
+                                : 'bg-[#00D4AA]/15 text-[#00D4AA] border border-[#00D4AA]/30'}
+                            >
+                              {Number(herg) === 1 ? 'Risk' : 'Low Risk'}
+                            </Badge>
+                          ) : <span className="text-sm text-[#8B949E]">--</span>}
+                        </div>
+                      )
+                    })()}
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-[#8B949E] mb-1.5">Toxicity Panel</p>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      {([
+                        { label: 'Hepatotoxicity', key: 'Hepatotoxicity' },
+                        { label: 'Nephrotoxicity', key: 'Nephrotoxicity' },
+                        { label: 'Carcinogenicity', key: 'Carcinogenicity' },
+                      ] as const).map(({ label, key }) => {
+                        const val = (admetlab as Record<string, unknown>)?.[key]
+                        return (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className="text-xs text-[#8B949E]">{label}:</span>
+                            {val != null ? (
+                              <span className={Number(val) === 1 ? 'text-xs text-[#FF4B4B]' : 'text-xs text-[#00D4AA]'}>
+                                {Number(val) === 1 ? 'Positive' : 'Negative'}
+                              </span>
+                            ) : <span className="text-xs text-[#8B949E]">--</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-[#8B949E] mb-1.5">Absorption</p>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {([
+                        { label: 'Caco-2', key: 'Caco-2' },
+                        { label: 'PAMPA', key: 'PAMPA' },
+                        { label: 'Oral Bioavail.', key: 'Oral_Bioavailability' },
+                        { label: 'Water Solubility', key: 'Water_Solubility' },
+                      ] as const).map(({ label, key }) => {
+                        const val = (admetlab as Record<string, unknown>)?.[key]
+                        return (
+                          <div key={key}>
+                            <p className="text-xs text-[#8B949E]">{label}</p>
+                            <p className="text-sm font-mono text-[#FAFAFA]">{val != null ? String(val) : '--'}</p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-[#8B949E]">(Powered by ADMETlab 3.0)</p>
+                </CardContent>
+              )}
+            </Card>
           )}
 
           {(allPoses ?? allEnergies) && (allPoses?.length ?? allEnergies?.length ?? 0) > 0 && (

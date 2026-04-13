@@ -176,3 +176,13 @@ class SearchRequest(BaseModel):
 
 class UpdateLiteratureTagsRequest(BaseModel):
     tags: list[str]
+
+
+# ---------------------------------------------------------------------------
+# NP Atlas search
+# ---------------------------------------------------------------------------
+
+class NpAtlasSearchRequest(BaseModel):
+    query: str
+    search_type: str = "name"
+    max_results: int = Field(20, ge=1, le=100)

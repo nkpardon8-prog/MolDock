@@ -255,6 +255,39 @@ def get_protein_info(pdb_id: str) -> dict[str, Any]:
             "doi": primary.get("pdbx_database_id_DOI", "N/A"),
         }
 
+    # ── Quality metrics ─────────────────────────────────────────────────
+    vrpt_geom = data.get("pdbx_vrpt_summary_geometry", [{}])
+    if isinstance(vrpt_geom, list) and vrpt_geom:
+        vrpt_geom = vrpt_geom[0]
+    else:
+        vrpt_geom = {}
+    clashscore = vrpt_geom.get("clashscore")
+    ramachandran_outliers_pct = vrpt_geom.get("percent_ramachandran_outliers")
+
+    # R-free — refine is also a list (already parsed above for resolution)
+    r_free = None
+    if refine:
+        r_free = refine[0].get("ls_R_factor_R_free")
+
+    # Crystal pH — exptl_crystal_grow is a list
+    crystal_grow = data.get("exptl_crystal_grow", [{}])
+    if isinstance(crystal_grow, list) and crystal_grow:
+        crystal_ph = crystal_grow[0].get("pH")
+    else:
+        crystal_ph = None
+
+    # Binding affinity of co-crystallized ligands
+    binding_affinity_raw = data.get("rcsb_binding_affinity", [])
+    binding_affinity = [
+        {
+            "type": ba.get("type"),
+            "value": ba.get("value"),
+            "unit": ba.get("unit"),
+            "comp_id": ba.get("comp_id"),
+        }
+        for ba in binding_affinity_raw
+    ] or None
+
     result: dict[str, Any] = {
         "pdb_id": pdb_id,
         "title": title,
@@ -264,7 +297,55 @@ def get_protein_info(pdb_id: str) -> dict[str, Any]:
         "chains": chains,
         "ligands": ligands,
         "citation": citation,
+        "r_free": r_free,
+        "clashscore": clashscore,
+        "ramachandran_outliers_pct": ramachandran_outliers_pct,
+        "crystal_ph": crystal_ph,
+        "binding_affinity": binding_affinity,
     }
+
+    # ── Polymer entity enrichment (UniProt, gene, EC, GO) ────────────
+    try:
+        poly_url = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/1"
+        poly_resp = requests.get(poly_url, timeout=15)
+        poly_data = poly_resp.json() if poly_resp.status_code == 200 else {}
+
+        uniprot_accession = None
+        for align in poly_data.get("rcsb_polymer_entity_align", []):
+            if align.get("reference_database_name") == "UniProt":
+                uniprot_accession = align.get("reference_database_accession")
+                break
+        result["uniprot_accession"] = uniprot_accession
+
+        result["ec_number"] = poly_data.get("rcsb_polymer_entity", {}).get("pdbx_ec")
+
+        gene_name = None
+        for src in poly_data.get("entity_src_gen", []):
+            if src.get("pdbx_gene_src_gene"):
+                gene_name = src["pdbx_gene_src_gene"]
+                break
+        result["gene_name"] = gene_name
+
+        go_terms = [
+            ann.get("name", ann.get("annotation_id", ""))
+            for ann in poly_data.get("rcsb_polymer_entity_annotation", [])
+            if ann.get("type") == "GO"
+        ]
+        result["go_terms"] = go_terms or None
+
+        result["sequence_length"] = poly_data.get("entity_poly", {}).get(
+            "rcsb_sample_sequence_length"
+        )
+        mol_weight = poly_data.get("rcsb_polymer_entity", {}).get("formula_weight")
+        result["molecular_weight_kda"] = round(mol_weight, 2) if mol_weight else None
+    except Exception:
+        result.setdefault("uniprot_accession", None)
+        result.setdefault("ec_number", None)
+        result.setdefault("gene_name", None)
+        result.setdefault("go_terms", None)
+        result.setdefault("sequence_length", None)
+        result.setdefault("molecular_weight_kda", None)
+
     _logger.info("Metadata retrieved for %s", pdb_id)
     return result
 

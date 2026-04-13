@@ -102,10 +102,10 @@
 ## Biomedical Databases & APIs
 
 ### RCSB Protein Data Bank
-- **What it does:** Downloads protein crystal structures (.pdb files), provides metadata (organism, resolution, method, ligands, citations), full-text search across 200K+ structures.
+- **What it does:** Downloads protein crystal structures (.pdb files), provides metadata (organism, resolution, method, ligands, citations), full-text search across 200K+ structures. Polymer entity endpoint provides UniProt accession, EC number, GO terms, and gene names for biological context enrichment.
 - **Used in:** `core/fetch_pdb.py` (fetch_protein, search_pdb, get_protein_info)
 - **Why this tool:** THE canonical source for experimentally determined protein structures. There is no alternative — all protein crystal structures are deposited here.
-- **API endpoints:** `https://files.rcsb.org/download/`, `https://search.rcsb.org/`, `https://data.rcsb.org/`
+- **API endpoints:** `https://files.rcsb.org/download/`, `https://search.rcsb.org/`, `https://data.rcsb.org/` (including `/rest/v1/core/polymer_entity/`)
 - **Auth:** None (free, public)
 - **Citation:** Berman et al., Nucleic Acids Res. 2000, 28(1), 235-242
 
@@ -126,20 +126,42 @@
 - **Citation:** NCBI, National Library of Medicine
 
 ### ChEMBL
-- **What it does:** Retrieves known bioactive compounds and their activity data (IC50, Ki, EC50) against specific protein targets. 2.4M+ compounds, 20M+ activity records.
-- **Used in:** `core/literature.py` (get_known_actives via chembl_webresource_client)
+- **What it does:** Retrieves known bioactive compounds and their activity data (IC50, Ki, EC50) against specific protein targets. 2.4M+ compounds, 20M+ activity records. Mechanism endpoint provides drug mechanism-of-action data. Target summary statistics (total compounds tested, best IC50, approved drugs) via `get_target_summary()`.
+- **Used in:** `core/literature.py` (get_known_actives, get_target_summary via chembl_webresource_client)
 - **Why this tool:** Largest open-access bioactivity database. Critical for validating docking results against experimental data and finding reference compounds.
 - **Alternatives considered:** BindingDB (smaller, less API support), PubChem BioAssay (less curated). ChEMBL is the gold standard for curated activity data.
 - **Auth:** None (free, public)
 - **Citation:** Zdrazil et al., Nucleic Acids Res. 2024, 52(D1), D1180-D1192
 
 ### UniProt
-- **What it does:** Protein function annotations, domain architecture, disease associations, subcellular location, PDB cross-references. 250M+ protein sequences.
+- **What it does:** Protein function annotations, domain architecture, disease associations, subcellular location, PDB cross-references. 250M+ protein sequences. Expanded feature parsing includes active sites, binding sites, known mutations, and catalytic activity annotations.
 - **Used in:** `core/literature.py` (get_uniprot_info)
 - **Why this tool:** THE canonical protein knowledge base. Provides biological context that PDB structures alone cannot — function, disease relevance, known mutations.
 - **API endpoint:** `https://rest.uniprot.org/uniprotkb/`
 - **Auth:** None (free, public)
 - **Citation:** UniProt Consortium, Nucleic Acids Res. 2023, 51(D1), D523-D531
+
+### ADMETlab 3.0
+- **What it does:** ML-predicted ADMET profiling with 119 endpoints — CYP inhibition, hERG cardiotoxicity, organ toxicity, absorption, BBB permeability, and more. Accepts SMILES input, returns comprehensive pharmacokinetic and toxicity predictions.
+- **Used in:** `core/admet_check.py`
+- **Why this tool:** Most comprehensive free ADMET prediction service available. 119 endpoints cover far more than RDKit descriptors alone. Useful for early-stage lead triage before expensive experimental ADMET assays.
+- **Alternatives considered:** pkCSM (fewer endpoints, less accurate), SwissADME (web-only, no batch API), admetSAR (smaller model). ADMETlab 3.0 is the current state-of-the-art for ML-predicted ADMET.
+- **API endpoint:** POST `https://admetlab3.scbdd.com/api/admet`
+- **Auth:** None (free, public)
+- **Rate limits:** 5 req/sec, ~87s per 1000 molecules
+- **Note:** Server is known to be unstable; RDKit-based ADMET is used as automatic fallback when the API is unreachable.
+- **License:** Free for academic use
+- **Citation:** ADMETlab 3.0, Nucleic Acids Research 2024
+
+### Natural Products Atlas
+- **What it does:** Curated database of 36,500+ microbially-derived natural products with taxonomy, bioactivity data, and structure similarity search (Tanimoto). Supports text search by compound name and SMILES-based similarity search.
+- **Used in:** `core/fetch_compounds.py` (search_npatlas, search_npatlas_similar), `mcp_server.py` (search_natural_products tool)
+- **Why this tool:** The most comprehensive curated database of microbial natural products. Essential for Kaleem's marine natural products research — enables discovery of structurally related NPs and their known bioactivities.
+- **Alternatives considered:** COCONUT (larger but less curated), DNP (commercial, Chapman & Hall), MarinLit (marine-specific but commercial). NP Atlas is the best free, curated, API-accessible option for microbial NPs.
+- **API endpoint:** `https://www.npatlas.org/api/v1`
+- **Auth:** None (20 req/min free tier; higher limits available with API key from support@npatlas.org)
+- **License:** CC BY 4.0
+- **Citation:** NP Atlas 3.0, Nucleic Acids Research 2025
 
 ---
 
@@ -208,6 +230,12 @@
 | 2026-04-05 | Added NVIDIA MolMIM for generative molecular design | MolMIM | BioNeMo integration |
 | 2026-04-05 | Added RDKit SA Score for synthetic accessibility assessment | SA Score | BioNeMo integration |
 | 2026-04-05 | Added ProLIF for interaction fingerprinting | ProLIF | Analysis update |
+| 2026-04-13 | Added ADMETlab 3.0 for ML-predicted ADMET profiling (119 endpoints) | ADMETlab 3.0 | ADMET integration |
+| 2026-04-13 | Added Natural Products Atlas for microbial NP search and similarity | NP Atlas | NP Atlas integration |
+| 2026-04-13 | Updated RCSB PDB entry: documented polymer_entity endpoint for UniProt/EC/GO enrichment | RCSB PDB | Protein enrichment |
+| 2026-04-13 | Updated UniProt entry: documented expanded feature parsing (active sites, binding sites, mutations) | UniProt | Protein enrichment |
+| 2026-04-13 | Updated ChEMBL entry: documented mechanism endpoint and target summary statistics | ChEMBL | Protein enrichment |
+| 2026-04-13 | Added search_natural_products MCP tool and enriched protein_info with ChEMBL target summary | MCP Server | Tool registration |
 
 ---
 

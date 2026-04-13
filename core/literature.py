@@ -390,7 +390,11 @@ def get_uniprot_info(
     organism_data = data.get("organism", {})
     result["organism"] = organism_data.get("scientificName", "")
 
-    # Comments: function, subcellular location, disease
+    # Comments: function, subcellular location, disease, catalytic activity,
+    # tissue specificity
+    catalytic_activities: list[str] = []
+    tissue_specificity: str | None = None
+
     for comment in data.get("comments", []):
         comment_type = comment.get("commentType", "")
 
@@ -418,12 +422,54 @@ def get_uniprot_info(
                     entry = f"{disease_name}: {desc}"
                 result["disease_associations"].append(entry)
 
-    # Features: domains
+        elif comment_type == "CATALYTIC ACTIVITY":
+            reaction = comment.get("reaction", {})
+            reaction_name = reaction.get("name", "")
+            if reaction_name:
+                catalytic_activities.append(reaction_name)
+
+        elif comment_type == "TISSUE SPECIFICITY":
+            texts = comment.get("texts", [])
+            if texts:
+                tissue_specificity = texts[0].get("value")
+
+    # Features: domains, active sites, binding sites, natural variants
+    active_sites: list[dict] = []
+    binding_sites: list[dict] = []
+    known_mutations: list[dict] = []
+
     for feature in data.get("features", []):
-        if feature.get("type", "") == "Domain":
+        ft = feature.get("type", "")
+        if ft == "Domain":
             desc = feature.get("description", "")
             if desc:
                 result["domains"].append(desc)
+        elif ft == "Active site":
+            active_sites.append({
+                "position": feature.get("location", {}).get("start", {}).get("value"),
+                "description": feature.get("description", ""),
+            })
+        elif ft == "Binding site":
+            binding_sites.append({
+                "position": feature.get("location", {}).get("start", {}).get("value"),
+                "description": feature.get("description", ""),
+                "ligand": feature.get("ligand", {}).get("name"),
+            })
+        elif ft == "Natural variant":
+            loc = feature.get("location", {}).get("start", {}).get("value")
+            alt_seq = feature.get("alternativeSequence", {})
+            known_mutations.append({
+                "position": loc,
+                "original": alt_seq.get("originalSequence"),
+                "variant": (alt_seq.get("alternativeSequences") or [None])[0],
+                "description": feature.get("description", ""),
+            })
+
+    result["active_sites"] = active_sites or None
+    result["binding_sites"] = binding_sites or None
+    result["known_mutations"] = known_mutations or None
+    result["catalytic_activity"] = catalytic_activities or None
+    result["tissue_specificity"] = tissue_specificity
 
     # Cross-references: PDB structures
     for xref in data.get("uniProtKBCrossReferences", []):
@@ -444,6 +490,90 @@ def get_uniprot_info(
         len(result["pdb_structures"]),
     )
     return result
+
+
+def get_target_summary(uniprot_id: str) -> dict | None:
+    """Get ChEMBL summary: total compounds tested, best IC50, approved drugs.
+
+    Parameters
+    ----------
+    uniprot_id : str
+        UniProt accession (e.g. ``"P11511"``).
+
+    Returns
+    -------
+    dict or None
+        Keys: ``chembl_id``, ``total_compounds_tested``,
+        ``best_ic50_nm``, ``best_ic50_compound``, ``approved_drugs``.
+        Returns ``None`` if the target cannot be resolved.
+    """
+    from chembl_webresource_client.new_client import new_client
+
+    target_api = new_client.target
+    activity_api = new_client.activity
+    mech_api = new_client.mechanism
+
+    logger.info("Resolving ChEMBL target for UniProt %s", uniprot_id)
+
+    targets = target_api.filter(target_components__accession=uniprot_id).only(
+        "target_chembl_id", "pref_name", "target_type"
+    )
+    targets_list = list(targets) if targets else []
+    if not targets_list:
+        logger.warning("No ChEMBL target found for UniProt %s", uniprot_id)
+        return None
+
+    chembl_id = targets_list[0]["target_chembl_id"]
+    logger.info("Resolved to %s", chembl_id)
+
+    ic50_activities = activity_api.filter(
+        target_chembl_id=chembl_id, standard_type="IC50"
+    ).only("standard_value", "standard_units", "molecule_chembl_id")
+
+    try:
+        total = len(ic50_activities)
+    except Exception:
+        total = 0
+
+    activities_list = list(ic50_activities[:500])
+
+    best_ic50 = None
+    best_compound = None
+    for act in activities_list:
+        val = act.get("standard_value")
+        if val is not None:
+            try:
+                val = float(val)
+                if best_ic50 is None or val < best_ic50:
+                    best_ic50 = val
+                    best_compound = act.get("molecule_chembl_id")
+            except (ValueError, TypeError):
+                pass
+
+    mechs = list(mech_api.filter(target_chembl_id=chembl_id))
+    approved_drugs = [
+        {
+            "name": m.get("molecule_chembl_id"),
+            "mechanism": m.get("mechanism_of_action"),
+            "action_type": m.get("action_type"),
+            "max_phase": m.get("max_phase"),
+        }
+        for m in mechs
+        if m.get("max_phase") and m.get("max_phase") >= 3
+    ]
+
+    logger.info(
+        "ChEMBL summary for %s: %d IC50 records, %d approved drugs",
+        chembl_id, total, len(approved_drugs),
+    )
+
+    return {
+        "chembl_id": chembl_id,
+        "total_compounds_tested": total,
+        "best_ic50_nm": best_ic50,
+        "best_ic50_compound": best_compound,
+        "approved_drugs": approved_drugs,
+    }
 
 
 # ---------------------------------------------------------------------------
