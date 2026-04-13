@@ -139,7 +139,7 @@ def search_pdb(
         "query": {
             "type": "terminal",
             "service": "full_text",
-            "parameters": {"value": query},
+            "parameters": {"value": f'"{query}"'},
         },
         "return_type": "entry",
         "request_options": {
