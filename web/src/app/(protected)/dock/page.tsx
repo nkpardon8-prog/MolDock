@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { apiPost } from '@/lib/api'
 import { useJobStream } from '@/components/jobs/use-job-stream'
@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
-import { FlaskConical, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import { FlaskConical, ChevronDown, ChevronRight, ExternalLink, Search, X } from 'lucide-react'
 
 const AdmetRadar = dynamic(
   () => import('@/components/charts/admet-radar').then((m) => ({ default: m.AdmetRadar })),
@@ -34,6 +34,11 @@ function bindingQuality(energy: number): { label: string; color: string } {
 
 export default function DockPage() {
   const [pdbId, setPdbId] = useState('')
+  const [proteinQuery, setProteinQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Array<{ pdb_id: string; title: string; organism?: string; resolution?: number; method?: string }>>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [showDropdown, setShowDropdown] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const [compound, setCompound] = useState('')
   const [exhaustiveness, setExhaustiveness] = useState(32)
   const [jobId, setJobId] = useState<string | null>(null)
@@ -65,6 +70,62 @@ export default function DockPage() {
   const compoundCid = resultData?.compound_cid as number | undefined
   const iupacName = resultData?.iupac_name as string | undefined
   const formula = resultData?.formula as string | undefined
+
+  const isPdbId = (s: string) => /^[A-Za-z0-9]{4}$/.test(s.trim())
+
+  const handleProteinInput = useCallback((value: string) => {
+    setProteinQuery(value)
+    if (isPdbId(value)) {
+      setPdbId(value.trim().toUpperCase())
+      setShowDropdown(false)
+      setSearchResults([])
+    } else {
+      setPdbId('')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isPdbId(proteinQuery) || proteinQuery.trim().length < 2) {
+      setSearchResults([])
+      setShowDropdown(false)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setSearchLoading(true)
+      try {
+        const res = await apiPost<{ results: Array<{ pdb_id: string; title: string; organism?: string; resolution?: number; method?: string }> }>('/api/proteins/search', {
+          query: proteinQuery.trim(),
+          max_results: 8,
+        })
+        setSearchResults(res.results)
+        setShowDropdown(res.results.length > 0)
+      } catch {
+        setSearchResults([])
+      } finally {
+        setSearchLoading(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [proteinQuery])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const handleSelectProtein = useCallback((result: { pdb_id: string; title: string }) => {
+    setPdbId(result.pdb_id)
+    setProteinQuery(`${result.pdb_id} \u2014 ${result.title}`)
+    setShowDropdown(false)
+    setSearchResults([])
+  }, [])
 
   const handleSubmit = useCallback(async () => {
     if (!pdbId.trim() || !compound.trim()) return
@@ -122,16 +183,62 @@ export default function DockPage() {
         <CardContent>
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="pdb-id" className="text-[#FAFAFA]">PDB ID</Label>
-              <Input
-                id="pdb-id"
-                placeholder="e.g. 3S7S"
-                maxLength={4}
-                value={pdbId}
-                onChange={(e) => setPdbId(e.target.value)}
-                disabled={isRunning}
-                className="border-[#2A2F3E] bg-[#0E1117] font-mono uppercase text-[#FAFAFA]"
-              />
+              <Label htmlFor="pdb-id" className="text-[#FAFAFA]">
+                Protein <span className="text-[#8B949E] font-normal text-xs">(PDB ID or name)</span>
+              </Label>
+              <div className="relative" ref={dropdownRef}>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8B949E]" />
+                  <Input
+                    id="pdb-id"
+                    placeholder="e.g. 3S7S or aromatase"
+                    value={proteinQuery}
+                    onChange={(e) => handleProteinInput(e.target.value)}
+                    disabled={isRunning}
+                    className="border-[#2A2F3E] bg-[#0E1117] text-[#FAFAFA] pl-8 pr-8"
+                  />
+                  {searchLoading && (
+                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#8B949E] border-t-[#00D4AA]" />
+                    </div>
+                  )}
+                  {!searchLoading && pdbId && proteinQuery.length > 4 && (
+                    <button
+                      type="button"
+                      onClick={() => { setProteinQuery(''); setPdbId(''); setSearchResults([]); }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8B949E] hover:text-[#FAFAFA]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                {pdbId && proteinQuery !== pdbId && (
+                  <p className="mt-1 text-xs text-[#00D4AA] font-mono">PDB: {pdbId}</p>
+                )}
+                {showDropdown && searchResults.length > 0 && (
+                  <div className="absolute z-50 mt-1 w-full rounded-lg border border-[#2A2F3E] bg-[#1A1F2E] shadow-xl max-h-64 overflow-auto">
+                    {searchResults.map((r) => (
+                      <button
+                        key={r.pdb_id}
+                        type="button"
+                        onClick={() => handleSelectProtein(r)}
+                        className="w-full px-3 py-2 text-left hover:bg-[#2A2F3E] transition-colors border-b border-[#2A2F3E]/50 last:border-0"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm text-[#00D4AA] font-semibold">{r.pdb_id}</span>
+                          {r.resolution != null && (
+                            <span className="text-[10px] text-[#8B949E]">{Number(r.resolution).toFixed(1)}A</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#FAFAFA] truncate">{r.title}</p>
+                        {r.organism && (
+                          <p className="text-[10px] text-[#8B949E] italic truncate">{r.organism}</p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="space-y-2">
