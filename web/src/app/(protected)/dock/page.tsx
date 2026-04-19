@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { FlaskConical, ChevronDown, ChevronRight, ExternalLink, Search, X } from 'lucide-react'
+import { RunReportPanel } from '@/components/report/run-report-panel'
 
 const AdmetRadar = dynamic(
   () => import('@/components/charts/admet-radar').then((m) => ({ default: m.AdmetRadar })),
@@ -1125,6 +1126,10 @@ export default function DockPage() {
               <h2 className="mb-3 text-base font-semibold text-[#FAFAFA]">Output Files</h2>
               <FilePanel files={files} />
             </div>
+          )}
+
+          {runId && (
+            <RunReportPanel runId={runId} runType="dock" />
           )}
         </div>
       )}

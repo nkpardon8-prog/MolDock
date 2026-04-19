@@ -219,6 +219,21 @@
 
 ---
 
+## LLM Services
+
+### OpenRouter (Claude Sonnet 4)
+- **What it does:** LLM gateway used for Run Report narrative synthesis. Produces the five report sections (Methods, Purpose, Clinical Significance, What It Did, Additional Notes) from structured run data already in the DB. Pure text synthesis — no tool use.
+- **Used in:** `core/llm.py`, `core/report_service.py`, `api/routes/reports.py`
+- **Why this tool:** OpenAI-API-compatible gateway lets us call Claude (and any other model) through one SDK. Cheaper and faster than proxying through `claude -p` subprocess. The chat page keeps `claude -p` because it needs Claude Code's tool-use for running docks; report generation does not.
+- **Alternatives considered:** Direct Anthropic SDK (locks us to one provider), `claude -p` subprocess (slower, harder to cache, no structured output guarantees).
+- **API endpoint:** `https://openrouter.ai/api/v1` via the `openai` Python SDK (v1.40+, <2)
+- **Default model:** `anthropic/claude-sonnet-4` (configurable via `openrouter_default_model` in `api/config.py`)
+- **Auth:** API key (`OPENROUTER_API_KEY` in `.env`, must be set on the API host in production)
+- **License:** Commercial API
+- **Citation:** OpenRouter, https://openrouter.ai
+
+---
+
 ## Changelog
 
 | Date | Change | Tool | Author |
@@ -235,6 +250,7 @@
 | 2026-04-13 | Updated RCSB PDB entry: documented polymer_entity endpoint for UniProt/EC/GO enrichment | RCSB PDB | Protein enrichment |
 | 2026-04-13 | Updated UniProt entry: documented expanded feature parsing (active sites, binding sites, mutations) | UniProt | Protein enrichment |
 | 2026-04-13 | Updated ChEMBL entry: documented mechanism endpoint and target summary statistics | ChEMBL | Protein enrichment |
+| 2026-04-19 | Added OpenRouter (Claude Sonnet 4) for Run Report narrative synthesis | OpenRouter | Run reports |
 | 2026-04-13 | Added search_natural_products MCP tool and enriched protein_info with ChEMBL target summary | MCP Server | Tool registration |
 
 ---

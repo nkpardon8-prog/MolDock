@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     data_root: str = str(Path(__file__).parent.parent)
     cors_origins: list[str] = ["http://localhost:3000", "https://molecopilot.netlify.app"]
+    openrouter_api_key: str | None = None
+    openrouter_default_model: str = "anthropic/claude-sonnet-4"
 
     class Config:
         env_file = ".env"

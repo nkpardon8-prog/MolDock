@@ -119,3 +119,21 @@ export interface LiteratureSearch {
   timeframe?: string | null
   created_at?: string | null
 }
+
+export type SectionKey = 'methods' | 'purpose' | 'clinical_significance' | 'what_it_did' | 'notes'
+export type RunType = 'dock' | 'optimize' | 'chat_session' | 'project'
+export interface RunReport {
+  id: string
+  user_id: string
+  run_id: string | null
+  run_type: RunType
+  research_question: string | null
+  display_title: string
+  sections: Record<SectionKey, string>
+  model: string
+  source_run_ids: string[] | null
+  status: 'complete' | 'failed'
+  error: string | null
+  created_at: string
+  regenerated_at: string | null
+}

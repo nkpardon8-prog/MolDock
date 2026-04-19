@@ -18,7 +18,9 @@ import {
   Loader2,
   Menu,
   X,
+  FileText,
 } from 'lucide-react'
+import { RunReportPanel } from '@/components/report/run-report-panel'
 
 interface LocalMessage {
   id: string
@@ -45,6 +47,7 @@ export default function ChatPage() {
   const [sendError, setSendError] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -79,6 +82,7 @@ export default function ChatPage() {
     setActiveJobId(null)
     setSendError(null)
     setDrawerOpen(false)
+    setReportOpen(false)
     try {
       const data = await apiGet<ChatMessage[]>(`/api/chat/${sessionId}/messages`)
       setMessages(
@@ -103,6 +107,7 @@ export default function ChatPage() {
     setActiveJobId(null)
     setSendError(null)
     setDrawerOpen(false)
+    setReportOpen(false)
     inputRef.current?.focus()
   }
 
@@ -179,6 +184,8 @@ export default function ChatPage() {
   }, [messages, progress, scrollToBottom])
 
   const hasMessages = messages.length > 0 || activeJobId
+  const hasUserMessage = messages.some((m) => m.role === 'user')
+  const canGenerateReport = !!activeSessionId && hasUserMessage
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden">
@@ -279,6 +286,20 @@ export default function ChatPage() {
             </div>
           ) : (
             <div className="mx-auto max-w-3xl space-y-4">
+              {canGenerateReport && (
+                <div className="flex justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setReportOpen((v) => !v)}
+                    className="border-[#2A2F3E] text-[#FAFAFA] gap-1.5"
+                  >
+                    <FileText className="size-3" />
+                    {reportOpen ? 'Hide report' : 'Generate report for this session'}
+                  </Button>
+                </div>
+              )}
+
               {messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} />
               ))}
@@ -321,6 +342,10 @@ export default function ChatPage() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {reportOpen && activeSessionId && (
+                <RunReportPanel runId={activeSessionId} runType="chat_session" />
               )}
 
               <div ref={messagesEndRef} />

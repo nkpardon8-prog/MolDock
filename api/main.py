@@ -36,6 +36,7 @@ def _include_routes():
         optimize,
         export,
         jobs,
+        reports,
     )
     app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
     app.include_router(dock.router, prefix="/api/dock", tags=["Dock"])
@@ -47,6 +48,7 @@ def _include_routes():
     app.include_router(optimize.router, prefix="/api/optimize", tags=["Optimize"])
     app.include_router(export.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
+    app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 
 
 try:

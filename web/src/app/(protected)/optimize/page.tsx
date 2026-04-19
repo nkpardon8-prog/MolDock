@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ChevronDown, ChevronRight, Download } from 'lucide-react'
+import { RunReportPanel } from '@/components/report/run-report-panel'
 
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false })
 
@@ -480,6 +481,10 @@ export default function OptimizePage() {
                 </Card>
               )}
             </div>
+
+            {status === 'complete' && jobId && (
+              <RunReportPanel runId={jobId} runType="optimize" />
+            )}
 
             {/* Individual Analog Details */}
             <div className="space-y-2">

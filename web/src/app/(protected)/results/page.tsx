@@ -4,7 +4,9 @@ import { useState, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Download, FileText, ArrowUpDown, ChevronDown, ChevronRight } from 'lucide-react'
 import { apiGet, apiPost } from '@/lib/api'
-import type { Protein, DockingRun } from '@/lib/types'
+import type { Protein, DockingRun, RunReport } from '@/lib/types'
+import { RunReportPanel } from '@/components/report/run-report-panel'
+import { Textarea } from '@/components/ui/textarea'
 import { MetricCard } from '@/components/metric-card'
 import { EnergyBarChart } from '@/components/charts/energy-bar-chart'
 import { EnergyHistogram } from '@/components/charts/energy-histogram'
@@ -78,6 +80,11 @@ export default function ResultsPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [compareIds, setCompareIds] = useState<string[]>([])
   const [exporting, setExporting] = useState(false)
+  const [projectFormOpen, setProjectFormOpen] = useState(false)
+  const [projectQuestion, setProjectQuestion] = useState('')
+  const [projectBusy, setProjectBusy] = useState(false)
+  const [projectError, setProjectError] = useState<string | null>(null)
+  const [projectReportId, setProjectReportId] = useState<string | null>(null)
 
   const { data: proteins } = useQuery({
     queryKey: ['proteins'],
@@ -188,6 +195,26 @@ export default function ResultsPage() {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   }, [sortedRuns])
+
+  const handleGenerateProjectReport = useCallback(async () => {
+    const ids = sortedRuns.map((r) => r.id).slice(0, 50)
+    if (ids.length === 0) return
+    setProjectBusy(true)
+    setProjectError(null)
+    setProjectReportId(null)
+    try {
+      const report = await apiPost<RunReport>('/api/reports/project', {
+        source_run_ids: ids,
+        research_question: projectQuestion || null,
+      })
+      setProjectReportId(report.id)
+      setProjectFormOpen(false)
+    } catch (e) {
+      setProjectError(e instanceof Error ? e.message : 'Failed to generate project report')
+    } finally {
+      setProjectBusy(false)
+    }
+  }, [sortedRuns, projectQuestion])
 
   const handleExportDocx = useCallback(async () => {
     if (!sortedRuns.length) return
@@ -311,6 +338,59 @@ export default function ResultsPage() {
         <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
           <CardContent className="py-12 text-center text-[#8B949E]">
             No docking results match your filters.
+          </CardContent>
+        </Card>
+      )}
+
+      {sortedRuns.length > 0 && (
+        <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+          <CardContent className="pt-4 space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-sm font-medium text-[#FAFAFA]">Project Report</p>
+                <p className="text-xs text-[#8B949E]">
+                  Generate a rollup report over the {Math.min(sortedRuns.length, 50)} run
+                  {sortedRuns.length === 1 ? '' : 's'} currently shown
+                  {sortedRuns.length > 50 ? ' (capped at 50)' : ''}.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setProjectFormOpen((v) => !v)}
+                className="border-[#2A2F3E] text-[#FAFAFA] gap-1.5"
+              >
+                <FileText className="h-3 w-3" />
+                {projectFormOpen ? 'Cancel' : 'Generate project report'}
+              </Button>
+            </div>
+            {projectFormOpen && (
+              <div className="space-y-2 rounded-lg border border-[#2A2F3E] bg-[#0E1117] p-3">
+                <Label className="text-xs text-[#8B949E]">Research question (optional)</Label>
+                <Textarea
+                  value={projectQuestion}
+                  onChange={(e) => setProjectQuestion(e.target.value)}
+                  placeholder="What question should this rollup answer?"
+                  className="border-[#2A2F3E] bg-[#1A1F2E] text-[#FAFAFA]"
+                />
+                {projectError && (
+                  <p className="text-xs text-red-400">{projectError}</p>
+                )}
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    onClick={handleGenerateProjectReport}
+                    disabled={projectBusy}
+                    className="bg-[#00D4AA] text-[#0E1117] hover:bg-[#00D4AA]/80"
+                  >
+                    {projectBusy ? 'Generating...' : 'Generate'}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {projectReportId && (
+              <RunReportPanel reportId={projectReportId} />
+            )}
           </CardContent>
         </Card>
       )}

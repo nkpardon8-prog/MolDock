@@ -1,6 +1,9 @@
 from pydantic import BaseModel, Field
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, Literal, Optional, TypeVar
 from datetime import datetime
+
+
+SectionKey = Literal["methods", "purpose", "clinical_significance", "what_it_did", "notes"]
 
 
 T = TypeVar("T")
@@ -186,3 +189,39 @@ class NpAtlasSearchRequest(BaseModel):
     query: str
     search_type: str = "name"
     max_results: int = Field(20, ge=1, le=100)
+
+
+# ---------------------------------------------------------------------------
+# Run Reports
+# ---------------------------------------------------------------------------
+
+class RunReportResponse(BaseModel):
+    id: str
+    user_id: str
+    run_id: Optional[str] = None
+    run_type: Literal["dock", "optimize", "chat_session", "project"]
+    research_question: Optional[str] = None
+    display_title: Optional[str] = None
+    sections: dict[str, Any]
+    model: str
+    source_run_ids: Optional[list[str]] = None
+    status: Optional[str] = None
+    error: Optional[str] = None
+    created_at: Optional[datetime] = None
+    regenerated_at: Optional[datetime] = None
+
+
+class GenerateReportRequest(BaseModel):
+    run_id: str
+    run_type: Literal["dock", "optimize", "chat_session"]
+    research_question: Optional[str] = None
+
+
+class RegenerateReportRequest(BaseModel):
+    sections: list[SectionKey]
+    research_question: Optional[str] = None
+
+
+class ProjectRollupRequest(BaseModel):
+    source_run_ids: list[str] = Field(..., min_length=1, max_length=50)
+    research_question: Optional[str] = None
