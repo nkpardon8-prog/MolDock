@@ -1,0 +1,1125 @@
+'use client'
+
+import { useState, useCallback, useEffect, useRef } from 'react'
+import dynamic from 'next/dynamic'
+import { apiPost } from '@/lib/api'
+import { useJobStream } from '@/components/jobs/use-job-stream'
+import { JobProgress } from '@/components/jobs/job-progress'
+import { MetricCard } from '@/components/metric-card'
+import { FilePanel } from '@/components/file-panel'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
+import { Slider } from '@/components/ui/slider'
+import { Badge } from '@/components/ui/badge'
+import { FlaskConical, ChevronDown, ChevronRight, ExternalLink, Search, X } from 'lucide-react'
+import { RunReportPanel } from '@/components/report/run-report-panel'
+
+const AdmetRadar = dynamic(
+  () => import('@/components/charts/admet-radar').then((m) => ({ default: m.AdmetRadar })),
+  { ssr: false },
+)
+
+const EnergyBarChart = dynamic(
+  () => import('@/components/charts/energy-bar-chart').then((m) => ({ default: m.EnergyBarChart })),
+  { ssr: false },
+)
+
+function bindingQuality(energy: number): { label: string; color: string } {
+  if (energy <= -9.0) return { label: 'Excellent', color: '#00D4AA' }
+  if (energy <= -7.0) return { label: 'Strong', color: '#4ECDC4' }
+  if (energy <= -5.0) return { label: 'Moderate', color: '#FFD700' }
+  return { label: 'Weak', color: '#FF4B4B' }
+}
+
+function qualityColor(metric: string, value: number): string {
+  if (metric === 'r_free') {
+    if (value < 0.25) return '#00D4AA'
+    if (value <= 0.35) return '#FFD700'
+    return '#FF4B4B'
+  }
+  if (metric === 'clashscore') {
+    if (value < 10) return '#00D4AA'
+    if (value <= 20) return '#FFD700'
+    return '#FF4B4B'
+  }
+  if (metric === 'rama') {
+    if (value < 1) return '#00D4AA'
+    if (value <= 5) return '#FFD700'
+    return '#FF4B4B'
+  }
+  return '#8B949E'
+}
+
+interface NpAtlasResult {
+  npaid?: string
+  original_name?: string
+  name?: string
+  smiles?: string
+  inchikey?: string
+  organism?: string
+  origin_organism?: { genus?: string; species?: string }
+}
+
+export default function DockPage() {
+  const [pdbId, setPdbId] = useState('')
+  const [proteinQuery, setProteinQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Array<{ pdb_id: string; title: string; organism?: string; resolution?: number; method?: string }>>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [showDropdown, setShowDropdown] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const [compound, setCompound] = useState('')
+  const [exhaustiveness, setExhaustiveness] = useState(32)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [proteinInfoOpen, setProteinInfoOpen] = useState(true)
+  const [bindingSiteOpen, setBindingSiteOpen] = useState(true)
+  const [targetBioOpen, setTargetBioOpen] = useState(true)
+  const [knownActivesOpen, setKnownActivesOpen] = useState(true)
+  const [extAdmetOpen, setExtAdmetOpen] = useState(false)
+
+  const [npAtlasOpen, setNpAtlasOpen] = useState(false)
+  const [npAtlasQuery, setNpAtlasQuery] = useState('')
+  const [npAtlasBySimilarity, setNpAtlasBySimilarity] = useState(false)
+  const [npAtlasResults, setNpAtlasResults] = useState<NpAtlasResult[]>([])
+  const [npAtlasLoading, setNpAtlasLoading] = useState(false)
+
+  const { status, progress, result, error } = useJobStream(jobId)
+
+  const resultData = result as Record<string, unknown> | null
+  const bestEnergy = resultData?.best_energy as number | undefined
+  const allEnergies = resultData?.all_energies as number[] | undefined
+  const nPoses = resultData?.n_poses as number | undefined
+  const admet = resultData?.admet as Record<string, unknown> | undefined
+  const drugLikenessScore = (resultData?.drug_likeness_score ?? admet?.drug_likeness_score) as number | undefined
+  const saScore = (resultData?.sa_score ?? admet?.sa_score) as number | undefined
+  const saAssessment = (resultData?.sa_assessment ?? admet?.synthetic_assessment) as string | undefined
+  const outputPath = resultData?.output_path as string | undefined
+  const compoundName = resultData?.compound as string | undefined
+  const runId = resultData?.run_id as string | undefined
+  const proteinInfo = resultData?.protein_info as Record<string, unknown> | undefined
+  const bindingSite = resultData?.binding_site as Record<string, unknown> | undefined
+  const allPoses = resultData?.all_poses as Array<{affinity: number, rmsd_lb: number, rmsd_ub: number}> | undefined
+  const smiles = resultData?.smiles as string | undefined
+  const compoundCid = resultData?.compound_cid as number | undefined
+  const iupacName = resultData?.iupac_name as string | undefined
+  const formula = resultData?.formula as string | undefined
+
+  const uniprot = resultData?.uniprot as Record<string, unknown> | undefined
+  const targetSummary = resultData?.target_summary as Record<string, unknown> | undefined
+  const admetlab = resultData?.admetlab as Record<string, unknown> | undefined
+
+  const isPdbId = (s: string) => /^[A-Za-z0-9]{4}$/.test(s.trim())
+
+  const handleProteinInput = useCallback((value: string) => {
+    setProteinQuery(value)
+    if (isPdbId(value)) {
+      setPdbId(value.trim().toUpperCase())
+      setShowDropdown(false)
+      setSearchResults([])
+    } else {
+      setPdbId('')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isPdbId(proteinQuery) || proteinQuery.trim().length < 2) {
+      setSearchResults([])
+      setShowDropdown(false)
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setSearchLoading(true)
+      try {
+        const res = await apiPost<{ results: Array<{ pdb_id: string; title: string; organism?: string; resolution?: number; method?: string }> }>('/api/proteins/search', {
+          query: proteinQuery.trim(),
+          max_results: 8,
+        })
+        setSearchResults(res.results)
+        setShowDropdown(res.results.length > 0)
+      } catch {
+        setSearchResults([])
+      } finally {
+        setSearchLoading(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [proteinQuery])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  useEffect(() => {
+    if (!npAtlasOpen || npAtlasQuery.trim().length < 2) {
+      setNpAtlasResults([])
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setNpAtlasLoading(true)
+      try {
+        const res = await apiPost<{ results: NpAtlasResult[] }>('/api/compounds/search-npatlas', {
+          query: npAtlasQuery.trim(),
+          search_type: npAtlasBySimilarity ? 'similarity' : 'name',
+          max_results: 8,
+        })
+        setNpAtlasResults(res.results ?? [])
+      } catch {
+        setNpAtlasResults([])
+      } finally {
+        setNpAtlasLoading(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [npAtlasQuery, npAtlasBySimilarity, npAtlasOpen])
+
+  const handleSelectProtein = useCallback((result: { pdb_id: string; title: string }) => {
+    setPdbId(result.pdb_id)
+    setProteinQuery(`${result.pdb_id} \u2014 ${result.title}`)
+    setShowDropdown(false)
+    setSearchResults([])
+  }, [])
+
+  const handleSubmit = useCallback(async () => {
+    if (!pdbId.trim() || !compound.trim()) return
+
+    setSubmitError(null)
+    setSubmitting(true)
+    setJobId(null)
+
+    try {
+      const res = await apiPost<{ job_id: string; status: string }>('/api/dock/', {
+        pdb_id: pdbId.trim().toUpperCase(),
+        compound_input: compound.trim(),
+        exhaustiveness,
+      })
+      setJobId(res.job_id)
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error ? err.message : 'Failed to submit docking job')
+    } finally {
+      setSubmitting(false)
+    }
+  }, [pdbId, compound, exhaustiveness])
+
+  const isRunning = submitting || status === 'connecting' || status === 'streaming'
+  const quality = bestEnergy != null ? bindingQuality(bestEnergy) : null
+
+  // Only the docked output is exposed — the prepared receptor PDBQT and the
+  // pre-dock ligand PDBQT are not served by any endpoint, so advertising them
+  // with /api/proteins/{pdb}/file (raw PDB) or /api/results/{run}/file (docked
+  // output) would hand users the wrong file under a misleading label.
+  const files = runId && outputPath ? [{
+    name: outputPath.split('/').pop() || 'docked.pdbqt',
+    type: 'docked' as const,
+    downloadUrl: `/api/results/${runId}/file`,
+    path: outputPath,
+  }] : []
+
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <h1 className="text-xl font-bold text-[#FAFAFA]">Molecular Docking</h1>
+
+      <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+        <CardHeader>
+          <CardTitle className="text-[#FAFAFA]">Docking Parameters</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="pdb-id" className="text-[#FAFAFA]">
+                Protein <span className="text-[#8B949E] font-normal text-xs">(PDB ID or name)</span>
+              </Label>
+              <div className="relative" ref={dropdownRef}>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#8B949E]" />
+                  <Input
+                    id="pdb-id"
+                    placeholder="e.g. 3S7S or aromatase"
+                    value={proteinQuery}
+                    onChange={(e) => handleProteinInput(e.target.value)}
+                    disabled={isRunning}
+                    className="border-[#2A2F3E] bg-[#0E1117] text-[#FAFAFA] pl-8 pr-8"
+                  />
+                  {searchLoading && (
+                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#8B949E] border-t-[#00D4AA]" />
+                    </div>
+                  )}
+                  {!searchLoading && pdbId && proteinQuery.length > 4 && (
+                    <button
+                      type="button"
+                      onClick={() => { setProteinQuery(''); setPdbId(''); setSearchResults([]); }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8B949E] hover:text-[#FAFAFA]"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                {pdbId && proteinQuery !== pdbId && (
+                  <p className="mt-1 text-xs text-[#00D4AA] font-mono">PDB: {pdbId}</p>
+                )}
+                {!pdbId && proteinQuery.trim().length >= 2 && !showDropdown && !searchLoading && searchResults.length === 0 && (
+                  <p className="mt-1 text-xs text-[#8B949E]">No results found. Try a different name or enter a 4-character PDB ID directly.</p>
+                )}
+                {!pdbId && proteinQuery.trim().length >= 2 && !showDropdown && !searchLoading && searchResults.length > 0 && (
+                  <p className="mt-1 text-xs text-amber-400">Select a protein from the results above</p>
+                )}
+                {showDropdown && searchResults.length > 0 && (
+                  <div className="absolute z-50 mt-1 w-full rounded-lg border border-[#2A2F3E] bg-[#1A1F2E] shadow-xl max-h-64 overflow-auto">
+                    {searchResults.map((r) => (
+                      <button
+                        key={r.pdb_id}
+                        type="button"
+                        onClick={() => handleSelectProtein(r)}
+                        className="w-full px-3 py-2 text-left hover:bg-[#2A2F3E] transition-colors border-b border-[#2A2F3E]/50 last:border-0"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm text-[#00D4AA] font-semibold">{r.pdb_id}</span>
+                          {r.resolution != null && (
+                            <span className="text-[10px] text-[#8B949E]">{Number(r.resolution).toFixed(1)}A</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#FAFAFA] truncate">{r.title}</p>
+                        {r.organism && (
+                          <p className="text-[10px] text-[#8B949E] italic truncate">{r.organism}</p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="compound" className="text-[#FAFAFA]">Compound (name or SMILES)</Label>
+              <Input
+                id="compound"
+                placeholder="e.g. aspirin or CC(=O)Oc1ccccc1C(=O)O"
+                value={compound}
+                onChange={(e) => setCompound(e.target.value)}
+                disabled={isRunning}
+                className="border-[#2A2F3E] bg-[#0E1117] text-[#FAFAFA]"
+              />
+              <button
+                type="button"
+                onClick={() => { setNpAtlasOpen(!npAtlasOpen); setNpAtlasQuery(''); setNpAtlasResults([]); }}
+                className="text-xs text-[#00D4AA] hover:underline"
+              >
+                {npAtlasOpen ? 'Close NP Atlas' : 'Search NP Atlas'}
+              </button>
+              {npAtlasOpen && (
+                <div className="mt-2 rounded-lg border border-[#2A2F3E] bg-[#0E1117] p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder={npAtlasBySimilarity ? 'Enter SMILES...' : 'Compound name...'}
+                      value={npAtlasQuery}
+                      onChange={(e) => setNpAtlasQuery(e.target.value)}
+                      className="border-[#2A2F3E] bg-[#1A1F2E] text-[#FAFAFA] text-xs h-8"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { setNpAtlasBySimilarity(!npAtlasBySimilarity); setNpAtlasQuery(''); setNpAtlasResults([]); }}
+                      className={`text-xs h-8 shrink-0 border-[#2A2F3E] ${npAtlasBySimilarity ? 'bg-[#00D4AA]/15 text-[#00D4AA]' : 'bg-transparent text-[#8B949E]'}`}
+                    >
+                      By Similarity
+                    </Button>
+                  </div>
+                  {npAtlasLoading && (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="h-3 w-3 animate-spin rounded-full border-2 border-[#8B949E] border-t-[#00D4AA]" />
+                      <span className="text-xs text-[#8B949E]">Searching NP Atlas...</span>
+                    </div>
+                  )}
+                  {npAtlasResults.length > 0 && (
+                    <div className="max-h-48 overflow-auto space-y-1">
+                      {npAtlasResults.map((np, i) => (
+                        <button
+                          key={np.npaid ?? i}
+                          type="button"
+                          onClick={() => {
+                            if (np.smiles) setCompound(np.smiles)
+                            setNpAtlasOpen(false)
+                            setNpAtlasQuery('')
+                            setNpAtlasResults([])
+                          }}
+                          className="w-full text-left px-2 py-1.5 rounded hover:bg-[#2A2F3E] transition-colors"
+                        >
+                          <p className="text-xs text-[#FAFAFA] font-medium">{np.original_name ?? np.name ?? np.npaid ?? 'Unknown'}</p>
+                          {(np.organism || np.origin_organism) && (
+                            <p className="text-[10px] text-[#8B949E] italic">
+                              {np.organism || [np.origin_organism?.genus, np.origin_organism?.species].filter(Boolean).join(' ')}
+                            </p>
+                          )}
+                          {np.smiles && (
+                            <p className="text-[10px] text-[#8B949E] font-mono truncate">{np.smiles.length > 60 ? np.smiles.slice(0, 60) + '...' : np.smiles}</p>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!npAtlasLoading && npAtlasQuery.trim().length >= 2 && npAtlasResults.length === 0 && (
+                    <p className="text-xs text-[#8B949E] py-1">No results found.</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 sm:col-span-2">
+              <Label className="text-[#FAFAFA]">
+                Exhaustiveness: <span className="font-mono text-[#00D4AA]">{exhaustiveness}</span>
+              </Label>
+              <Slider
+                min={8}
+                max={64}
+                step={1}
+                value={exhaustiveness}
+                onValueChange={(val) => setExhaustiveness(val as number)}
+                disabled={isRunning}
+              />
+              <div className="flex justify-between text-xs text-[#8B949E]">
+                <span>8 (fast)</span>
+                <span>64 (thorough)</span>
+              </div>
+            </div>
+          </div>
+
+          {submitError && (
+            <div className="mt-4 rounded-lg border border-red-500/50 bg-red-950/30 p-3">
+              <p className="text-sm text-red-400">{submitError}</p>
+            </div>
+          )}
+
+          <Button
+            className="mt-5 gap-2 bg-[#00D4AA] text-[#0E1117] hover:bg-[#00D4AA]/80"
+            disabled={isRunning || !pdbId.trim() || !compound.trim()}
+            onClick={handleSubmit}
+          >
+            <FlaskConical className="size-4" />
+            {submitting ? 'Submitting...' : 'Start Docking'}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {(status === 'connecting' || status === 'streaming' || status === 'error') && (
+        <JobProgress status={status} progress={progress} error={error} />
+      )}
+
+      {status === 'error' && error && (
+        <div className="rounded-lg border border-red-500/50 bg-red-950/30 p-4">
+          <p className="text-sm font-medium text-red-400">{error}</p>
+        </div>
+      )}
+
+      {status === 'complete' && resultData && (
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <MetricCard
+              label="Best Energy"
+              value={bestEnergy != null ? `${bestEnergy.toFixed(1)} kcal/mol` : '--'}
+              deltaColor={quality?.color}
+            />
+            <MetricCard
+              label="Poses Found"
+              value={nPoses ?? allEnergies?.length ?? '--'}
+            />
+            <MetricCard
+              label="Binding Quality"
+              value={quality?.label ?? '--'}
+              deltaColor={quality?.color}
+            />
+            <MetricCard
+              label="Drug-likeness"
+              value={drugLikenessScore != null ? drugLikenessScore.toFixed(2) : '--'}
+              delta={admet?.assessment as string | undefined}
+              deltaColor={drugLikenessScore != null && drugLikenessScore >= 0.7 ? '#00D4AA' : '#FFD700'}
+            />
+            <MetricCard
+              label="SA Score"
+              value={saScore != null ? saScore.toFixed(1) : '--'}
+              delta={saAssessment}
+              deltaColor={saScore != null && saScore <= 3 ? '#00D4AA' : '#FFD700'}
+            />
+          </div>
+
+          {proteinInfo && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader
+                className="cursor-pointer select-none"
+                onClick={() => setProteinInfoOpen(!proteinInfoOpen)}
+              >
+                <div className="flex items-center gap-2">
+                  {proteinInfoOpen
+                    ? <ChevronDown className="h-4 w-4 text-[#8B949E]" />
+                    : <ChevronRight className="h-4 w-4 text-[#8B949E]" />}
+                  <CardTitle className="text-sm text-[#FAFAFA]">Protein Information</CardTitle>
+                </div>
+              </CardHeader>
+              {proteinInfoOpen && (
+                <CardContent>
+                  <div className="mb-3 flex items-center gap-2 flex-wrap">
+                    {proteinInfo.title != null && (
+                      <h3 className="text-sm font-semibold text-[#FAFAFA]">{String(proteinInfo.title)}</h3>
+                    )}
+                    {proteinInfo.gene_name != null && (
+                      <Badge variant="secondary" className="bg-[#00D4AA]/15 text-[#00D4AA] border border-[#00D4AA]/30 text-xs">
+                        {String(proteinInfo.gene_name)}
+                      </Badge>
+                    )}
+                    {proteinInfo.ec_number != null && (
+                      <Badge variant="outline" className="border-[#2A2F3E] text-[#8B949E] text-xs">
+                        EC {String(proteinInfo.ec_number)}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {proteinInfo.organism != null && (
+                      <div>
+                        <p className="text-xs text-[#8B949E]">Organism</p>
+                        <p className="text-sm text-[#FAFAFA]">{String(proteinInfo.organism)}</p>
+                      </div>
+                    )}
+                    {proteinInfo.resolution != null && (
+                      <div>
+                        <p className="text-xs text-[#8B949E]">Resolution</p>
+                        <p className="text-sm font-mono text-[#FAFAFA]">{Number(proteinInfo.resolution).toFixed(2)} A</p>
+                      </div>
+                    )}
+                    {proteinInfo.method != null && (
+                      <div>
+                        <p className="text-xs text-[#8B949E]">Method</p>
+                        <p className="text-sm text-[#FAFAFA]">{String(proteinInfo.method)}</p>
+                      </div>
+                    )}
+                    {Array.isArray(proteinInfo.chains) && (
+                      <div>
+                        <p className="text-xs text-[#8B949E]">Chains</p>
+                        <p className="text-sm text-[#FAFAFA]">{proteinInfo.chains.length}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {(proteinInfo.r_free != null || proteinInfo.clashscore != null || proteinInfo.ramachandran_outliers_pct != null) && (
+                    <div className="mt-3 grid grid-cols-3 gap-3">
+                      {proteinInfo.r_free != null && (
+                        <div>
+                          <p className="text-xs text-[#8B949E]">R-free</p>
+                          <p className="text-sm font-mono" style={{ color: qualityColor('r_free', Number(proteinInfo.r_free)) }}>
+                            {Number(proteinInfo.r_free).toFixed(3)}
+                          </p>
+                        </div>
+                      )}
+                      {proteinInfo.clashscore != null && (
+                        <div>
+                          <p className="text-xs text-[#8B949E]">Clashscore</p>
+                          <p className="text-sm font-mono" style={{ color: qualityColor('clashscore', Number(proteinInfo.clashscore)) }}>
+                            {Number(proteinInfo.clashscore).toFixed(1)}
+                          </p>
+                        </div>
+                      )}
+                      {proteinInfo.ramachandran_outliers_pct != null && (
+                        <div>
+                          <p className="text-xs text-[#8B949E]">Ramachandran Outliers</p>
+                          <p className="text-sm font-mono" style={{ color: qualityColor('rama', Number(proteinInfo.ramachandran_outliers_pct)) }}>
+                            {Number(proteinInfo.ramachandran_outliers_pct).toFixed(1)}%
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {Array.isArray(proteinInfo.ligands) && proteinInfo.ligands.length > 0 && (
+                    <div className="mt-3">
+                      <p className="mb-1.5 text-xs text-[#8B949E]">Co-crystallized Ligands</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {proteinInfo.ligands.map((lig, i) => (
+                          <Badge key={i} variant="secondary" className="bg-[#00D4AA]/15 text-[#00D4AA] border border-[#00D4AA]/30">
+                            {String(lig)}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {Array.isArray(proteinInfo.binding_affinity) && proteinInfo.binding_affinity.length > 0 && (
+                    <div className="mt-3">
+                      <p className="mb-1.5 text-xs text-[#8B949E]">Known Binding Affinity</p>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-[#2A2F3E] text-[#8B949E]">
+                            <th className="pb-1.5 text-left font-medium text-xs">Type</th>
+                            <th className="pb-1.5 text-left font-medium text-xs">Value</th>
+                            <th className="pb-1.5 text-left font-medium text-xs">Unit</th>
+                            <th className="pb-1.5 text-left font-medium text-xs">Ligand</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-[#FAFAFA]">
+                          {(proteinInfo.binding_affinity as Array<Record<string, unknown>>).map((ba, i) => (
+                            <tr key={i} className="border-b border-[#2A2F3E]/50">
+                              <td className="py-1 text-xs">{String(ba.type ?? '--')}</td>
+                              <td className="py-1 text-xs font-mono">{ba.value != null ? String(ba.value) : '--'}</td>
+                              <td className="py-1 text-xs">{String(ba.unit ?? '--')}</td>
+                              <td className="py-1 text-xs font-mono">{String(ba.comp_id ?? '--')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {proteinInfo.citation != null && typeof proteinInfo.citation === 'object' && (
+                    <div className="mt-3 rounded border border-[#2A2F3E] bg-[#0E1117] p-2.5">
+                      <p className="text-xs text-[#8B949E]">Citation</p>
+                      <p className="mt-0.5 text-sm text-[#FAFAFA]">
+                        {(proteinInfo.citation as Record<string, unknown>).title != null ? String((proteinInfo.citation as Record<string, unknown>).title) : null}
+                        {(proteinInfo.citation as Record<string, unknown>).journal != null ? (
+                          <>, <span className="italic">{String((proteinInfo.citation as Record<string, unknown>).journal)}</span></>
+                        ) : null}
+                        {(proteinInfo.citation as Record<string, unknown>).year != null ? (
+                          <> ({String((proteinInfo.citation as Record<string, unknown>).year)})</>
+                        ) : null}
+                      </p>
+                      {(proteinInfo.citation as Record<string, unknown>).doi != null && (
+                        <a
+                          href={`https://doi.org/${String((proteinInfo.citation as Record<string, unknown>).doi)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 inline-flex items-center gap-1 text-xs text-[#00D4AA] hover:underline"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          DOI: {String((proteinInfo.citation as Record<string, unknown>).doi)}
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              )}
+            </Card>
+          )}
+
+          {uniprot && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader
+                className="cursor-pointer select-none"
+                onClick={() => setTargetBioOpen(!targetBioOpen)}
+              >
+                <div className="flex items-center gap-2">
+                  {targetBioOpen
+                    ? <ChevronDown className="h-4 w-4 text-[#8B949E]" />
+                    : <ChevronRight className="h-4 w-4 text-[#8B949E]" />}
+                  <CardTitle className="text-sm text-[#FAFAFA]">Target Biology</CardTitle>
+                </div>
+              </CardHeader>
+              {targetBioOpen && (
+                <CardContent className="space-y-3">
+                  {uniprot.function != null && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1">Function</p>
+                      <p className="text-sm text-[#FAFAFA]">{String(uniprot.function)}</p>
+                    </div>
+                  )}
+
+                  {Array.isArray(uniprot.active_sites) && (uniprot.active_sites as Array<Record<string, unknown>>).length > 0 && (
+                    <div>
+                      <p className="mb-1.5 text-xs text-[#8B949E]">Active Site Residues</p>
+                      <div className="flex flex-wrap gap-1">
+                        {(uniprot.active_sites as Array<Record<string, unknown>>).map((site, i) => (
+                          <Badge key={i} variant="outline" className="border-[#2A2F3E] text-[#8B949E] text-[10px] font-mono px-1.5 py-0">
+                            {site.position != null ? String(site.position) : '?'}{site.description ? ` - ${String(site.description)}` : ''}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {Array.isArray(uniprot.catalytic_activity) && (uniprot.catalytic_activity as string[]).length > 0 && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1">Catalytic Activity</p>
+                      <p className="text-sm text-[#FAFAFA]">{(uniprot.catalytic_activity as string[])[0]}</p>
+                    </div>
+                  )}
+
+                  {Array.isArray(uniprot.disease_associations) && (uniprot.disease_associations as string[]).length > 0 && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1">Disease Associations</p>
+                      <ul className="space-y-1">
+                        {(uniprot.disease_associations as string[]).map((d, i) => (
+                          <li key={i} className="text-sm text-[#FAFAFA]">{d}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {uniprot.tissue_specificity != null && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1">Tissue Specificity</p>
+                      <p className="text-sm text-[#FAFAFA]">{String(uniprot.tissue_specificity)}</p>
+                    </div>
+                  )}
+                </CardContent>
+              )}
+            </Card>
+          )}
+
+          {targetSummary && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader
+                className="cursor-pointer select-none"
+                onClick={() => setKnownActivesOpen(!knownActivesOpen)}
+              >
+                <div className="flex items-center gap-2">
+                  {knownActivesOpen
+                    ? <ChevronDown className="h-4 w-4 text-[#8B949E]" />
+                    : <ChevronRight className="h-4 w-4 text-[#8B949E]" />}
+                  <CardTitle className="text-sm text-[#FAFAFA]">Known Actives Benchmark</CardTitle>
+                </div>
+              </CardHeader>
+              {knownActivesOpen && (
+                <CardContent className="space-y-3">
+                  {targetSummary.total_compounds_tested != null && (
+                    <p className="text-sm text-[#FAFAFA]">
+                      <span className="font-mono text-[#00D4AA] font-semibold">{String(targetSummary.total_compounds_tested)}</span>{' '}
+                      compounds tested in ChEMBL
+                    </p>
+                  )}
+                  {targetSummary.best_ic50_nm != null && (
+                    <p className="text-sm text-[#FAFAFA]">
+                      Best IC50: <span className="font-mono text-[#00D4AA] font-semibold">{Number(targetSummary.best_ic50_nm).toFixed(1)} nM</span>
+                      {targetSummary.best_ic50_compound != null && (
+                        <span className="text-[#8B949E]"> ({String(targetSummary.best_ic50_compound)})</span>
+                      )}
+                    </p>
+                  )}
+                  {Array.isArray(targetSummary.approved_drugs) && (targetSummary.approved_drugs as Array<Record<string, unknown>>).length > 0 && (
+                    <div>
+                      <p className="text-xs text-[#8B949E] mb-1.5">Approved Drugs</p>
+                      <div className="space-y-1.5">
+                        {(targetSummary.approved_drugs as Array<Record<string, unknown>>).map((drug, i) => (
+                          <div key={i} className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm text-[#FAFAFA]">{String(drug.name ?? '--')}</span>
+                            {drug.mechanism != null && (
+                              <Badge variant="secondary" className="bg-[#00D4AA]/15 text-[#00D4AA] border border-[#00D4AA]/30 text-[10px]">
+                                {String(drug.mechanism)}
+                              </Badge>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              )}
+            </Card>
+          )}
+
+          {bindingSite && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader
+                className="cursor-pointer select-none"
+                onClick={() => setBindingSiteOpen(!bindingSiteOpen)}
+              >
+                <div className="flex items-center gap-2">
+                  {bindingSiteOpen
+                    ? <ChevronDown className="h-4 w-4 text-[#8B949E]" />
+                    : <ChevronRight className="h-4 w-4 text-[#8B949E]" />}
+                  <CardTitle className="text-sm text-[#FAFAFA]">Binding Site</CardTitle>
+                </div>
+              </CardHeader>
+              {bindingSiteOpen && (
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    <div>
+                      <p className="text-xs text-[#8B949E]">Center (X, Y, Z)</p>
+                      <p className="text-sm font-mono text-[#FAFAFA]">
+                        {bindingSite.center_x != null ? Number(bindingSite.center_x).toFixed(1) : '--'},{' '}
+                        {bindingSite.center_y != null ? Number(bindingSite.center_y).toFixed(1) : '--'},{' '}
+                        {bindingSite.center_z != null ? Number(bindingSite.center_z).toFixed(1) : '--'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#8B949E]">Box Size (X, Y, Z)</p>
+                      <p className="text-sm font-mono text-[#FAFAFA]">
+                        {bindingSite.size_x != null ? Number(bindingSite.size_x).toFixed(1) : '--'},{' '}
+                        {bindingSite.size_y != null ? Number(bindingSite.size_y).toFixed(1) : '--'},{' '}
+                        {bindingSite.size_z != null ? Number(bindingSite.size_z).toFixed(1) : '--'}
+                      </p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="text-xs text-[#8B949E]">Detected Ligand</p>
+                      <div className="mt-1">
+                        {bindingSite.ligand_found ? (
+                          <Badge variant="secondary" className="bg-[#00D4AA]/15 text-[#00D4AA] border border-[#00D4AA]/30">
+                            {bindingSite.ligand_resname ? String(bindingSite.ligand_resname) : 'Found'}
+                          </Badge>
+                        ) : (
+                          <span className="text-sm text-[#8B949E]">None detected</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {Array.isArray(bindingSite.residues_nearby) && bindingSite.residues_nearby.length > 0 && (
+                    <div className="mt-3">
+                      <p className="mb-1.5 text-xs text-[#8B949E]">Nearby Residues</p>
+                      <div className="flex flex-wrap gap-1">
+                        {bindingSite.residues_nearby.map((res, i) => (
+                          <Badge key={i} variant="outline" className="border-[#2A2F3E] text-[#8B949E] text-[10px] font-mono px-1.5 py-0">
+                            {String(res)}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              )}
+            </Card>
+          )}
+
+          {smiles && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader>
+                <CardTitle className="text-sm text-[#FAFAFA]">Compound Identity</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs text-[#8B949E]">SMILES</p>
+                    <pre className="mt-1 overflow-x-auto rounded border border-[#2A2F3E] bg-[#0E1117] p-2 font-mono text-xs text-[#FAFAFA]">{smiles}</pre>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {compoundCid != null && (
+                      <div>
+                        <p className="text-xs text-[#8B949E]">PubChem CID</p>
+                        <a
+                          href={`https://pubchem.ncbi.nlm.nih.gov/compound/${compoundCid}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-sm text-[#00D4AA] hover:underline"
+                        >
+                          {compoundCid}
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                    )}
+                    {iupacName && (
+                      <div>
+                        <p className="text-xs text-[#8B949E]">IUPAC Name</p>
+                        <p className="text-sm text-[#FAFAFA]">{iupacName}</p>
+                      </div>
+                    )}
+                    {formula && (
+                      <div>
+                        <p className="text-xs text-[#8B949E]">Formula</p>
+                        <p className="text-sm font-mono text-[#FAFAFA]">{formula}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {admet && (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+                <CardHeader><CardTitle className="text-sm text-[#FAFAFA]">Lipinski Rule of Five</CardTitle></CardHeader>
+                <CardContent>
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b border-[#2A2F3E] text-[#8B949E]">
+                      <th className="pb-2 text-left font-medium">Property</th>
+                      <th className="pb-2 text-left font-medium">Value</th>
+                      <th className="pb-2 text-left font-medium">Limit</th>
+                      <th className="pb-2 text-left font-medium">Status</th>
+                    </tr></thead>
+                    <tbody className="text-[#FAFAFA]">
+                      {[
+                        { prop: 'MW', val: admet.mw, limit: '<=500', pass: Number(admet.mw) <= 500 },
+                        { prop: 'LogP', val: admet.logp, limit: '<=5', pass: Number(admet.logp) <= 5 },
+                        { prop: 'HBD', val: admet.hbd, limit: '<=5', pass: Number(admet.hbd) <= 5 },
+                        { prop: 'HBA', val: admet.hba, limit: '<=10', pass: Number(admet.hba) <= 10 },
+                      ].map(r => (
+                        <tr key={r.prop} className="border-b border-[#2A2F3E]/50">
+                          <td className="py-1.5 text-[#8B949E]">{r.prop}</td>
+                          <td className="py-1.5 font-mono">{r.val != null ? Number(r.val).toFixed(2) : '--'}</td>
+                          <td className="py-1.5 text-[#8B949E]">{r.limit}</td>
+                          <td className="py-1.5"><span className={r.pass ? 'text-[#00D4AA]' : 'text-[#FF4B4B]'}>{r.pass ? 'Pass' : 'Fail'}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {(() => {
+                      const lipinski = admet.lipinski as Record<string, unknown> | undefined
+                      const violations = lipinski?.violations as number | undefined
+                      if (violations == null) return null
+                      const passed = 4 - violations
+                      return (
+                        <tfoot>
+                          <tr>
+                            <td colSpan={4} className="pt-2 text-xs text-[#8B949E]">
+                              <span className={passed >= 3 ? 'text-[#00D4AA]' : 'text-[#FFD700]'}>
+                                {passed}/4 rules passed
+                              </span>
+                              {' '}({violations} violation{violations !== 1 ? 's' : ''})
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )
+                    })()}
+                  </table>
+                  {admet.rotatable_bonds != null && (
+                    <>
+                      <h4 className="mt-4 text-sm font-medium text-[#FAFAFA]">Veber Rules</h4>
+                      <table className="mt-1 w-full text-sm">
+                        <tbody className="text-[#FAFAFA]">
+                          <tr className="border-b border-[#2A2F3E]/50">
+                            <td className="py-1.5 text-[#8B949E]">RotBonds</td>
+                            <td className="py-1.5 font-mono">{String(admet.rotatable_bonds)}</td>
+                            <td className="py-1.5 text-[#8B949E]">{'<=10'}</td>
+                            <td className="py-1.5"><span className={Number(admet.rotatable_bonds) <= 10 ? 'text-[#00D4AA]' : 'text-[#FF4B4B]'}>{Number(admet.rotatable_bonds) <= 10 ? 'Pass' : 'Fail'}</span></td>
+                          </tr>
+                          <tr className="border-b border-[#2A2F3E]/50">
+                            <td className="py-1.5 text-[#8B949E]">TPSA</td>
+                            <td className="py-1.5 font-mono">{admet.tpsa != null ? Number(admet.tpsa).toFixed(1) : '--'}</td>
+                            <td className="py-1.5 text-[#8B949E]">{'<=140'}</td>
+                            <td className="py-1.5"><span className={Number(admet.tpsa) <= 140 ? 'text-[#00D4AA]' : 'text-[#FF4B4B]'}>{Number(admet.tpsa) <= 140 ? 'Pass' : 'Fail'}</span></td>
+                          </tr>
+                        </tbody>
+                        {(() => {
+                          const veber = admet.veber as Record<string, unknown> | undefined
+                          const violations = veber?.violations as number | undefined
+                          if (violations == null) return null
+                          const passed = 2 - violations
+                          return (
+                            <tfoot>
+                              <tr>
+                                <td colSpan={4} className="pt-2 text-xs text-[#8B949E]">
+                                  <span className={passed >= 2 ? 'text-[#00D4AA]' : 'text-[#FFD700]'}>
+                                    {passed}/2 rules passed
+                                  </span>
+                                  {' '}({violations} violation{violations !== 1 ? 's' : ''})
+                                </td>
+                              </tr>
+                            </tfoot>
+                          )
+                        })()}
+                      </table>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+              <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+                <CardContent className="pt-4">
+                  <AdmetRadar admet={admet} compoundName={compoundName || compound} />
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {admetlab != null && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader
+                className="cursor-pointer select-none"
+                onClick={() => setExtAdmetOpen(!extAdmetOpen)}
+              >
+                <div className="flex items-center gap-2">
+                  {extAdmetOpen
+                    ? <ChevronDown className="h-4 w-4 text-[#8B949E]" />
+                    : <ChevronRight className="h-4 w-4 text-[#8B949E]" />}
+                  <CardTitle className="text-sm text-[#FAFAFA]">Extended ADMET</CardTitle>
+                  <span className="text-[10px] text-[#8B949E]">(ADMETlab 3.0)</span>
+                </div>
+              </CardHeader>
+              {extAdmetOpen && (
+                <CardContent className="space-y-4">
+                  <div>
+                    <p className="text-xs text-[#8B949E] mb-1.5">CYP Inhibition</p>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-[#2A2F3E] text-[#8B949E]">
+                          <th className="pb-1.5 text-left font-medium text-xs">Enzyme</th>
+                          <th className="pb-1.5 text-left font-medium text-xs">Prediction</th>
+                          <th className="pb-1.5 text-left font-medium text-xs">Probability</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-[#FAFAFA]">
+                        {(['CYP1A2', 'CYP2C9', 'CYP2C19', 'CYP2D6', 'CYP3A4'] as const).map((enzyme) => {
+                          const key = `${enzyme}_inhibitor` as string
+                          const val = (admetlab as Record<string, unknown>)[key]
+                          const probKey = `${key}_prob` as string
+                          const prob = (admetlab as Record<string, unknown>)[probKey]
+                          return (
+                            <tr key={enzyme} className="border-b border-[#2A2F3E]/50">
+                              <td className="py-1 text-xs font-mono">{enzyme}</td>
+                              <td className="py-1 text-xs">
+                                {val != null ? (
+                                  <span className={Number(val) === 1 ? 'text-[#FF4B4B]' : 'text-[#00D4AA]'}>
+                                    {Number(val) === 1 ? 'Inhibitor' : 'Non-inhibitor'}
+                                  </span>
+                                ) : '--'}
+                              </td>
+                              <td className="py-1 text-xs font-mono">{prob != null ? Number(prob).toFixed(2) : '--'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-[#8B949E] mb-1.5">Cardiotoxicity</p>
+                    {(() => {
+                      const herg = (admetlab as Record<string, unknown>)?.hERG_inhibitor ?? (admetlab as Record<string, unknown>)?.['hERG_inhibitor']
+                      return (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-[#FAFAFA]">hERG Inhibition:</span>
+                          {herg != null ? (
+                            <Badge
+                              variant="secondary"
+                              className={Number(herg) === 1
+                                ? 'bg-red-500/15 text-[#FF4B4B] border border-red-500/30'
+                                : 'bg-[#00D4AA]/15 text-[#00D4AA] border border-[#00D4AA]/30'}
+                            >
+                              {Number(herg) === 1 ? 'Risk' : 'Low Risk'}
+                            </Badge>
+                          ) : <span className="text-sm text-[#8B949E]">--</span>}
+                        </div>
+                      )
+                    })()}
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-[#8B949E] mb-1.5">Toxicity Panel</p>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      {([
+                        { label: 'Hepatotoxicity', key: 'Hepatotoxicity' },
+                        { label: 'Nephrotoxicity', key: 'Nephrotoxicity' },
+                        { label: 'Carcinogenicity', key: 'Carcinogenicity' },
+                      ] as const).map(({ label, key }) => {
+                        const val = (admetlab as Record<string, unknown>)?.[key]
+                        return (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className="text-xs text-[#8B949E]">{label}:</span>
+                            {val != null ? (
+                              <span className={Number(val) === 1 ? 'text-xs text-[#FF4B4B]' : 'text-xs text-[#00D4AA]'}>
+                                {Number(val) === 1 ? 'Positive' : 'Negative'}
+                              </span>
+                            ) : <span className="text-xs text-[#8B949E]">--</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-[#8B949E] mb-1.5">Absorption</p>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {([
+                        { label: 'Caco-2', key: 'Caco-2' },
+                        { label: 'PAMPA', key: 'PAMPA' },
+                        { label: 'Oral Bioavail.', key: 'Oral_Bioavailability' },
+                        { label: 'Water Solubility', key: 'Water_Solubility' },
+                      ] as const).map(({ label, key }) => {
+                        const val = (admetlab as Record<string, unknown>)?.[key]
+                        return (
+                          <div key={key}>
+                            <p className="text-xs text-[#8B949E]">{label}</p>
+                            <p className="text-sm font-mono text-[#FAFAFA]">{val != null ? String(val) : '--'}</p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-[#8B949E]">(Powered by ADMETlab 3.0)</p>
+                </CardContent>
+              )}
+            </Card>
+          )}
+
+          {(allPoses ?? allEnergies) && (allPoses?.length ?? allEnergies?.length ?? 0) > 0 && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardHeader>
+                <CardTitle className="text-[#FAFAFA]">Pose Energies</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-[#2A2F3E] text-[#8B949E]">
+                        <th className="pb-2 pr-4 font-medium">Pose</th>
+                        <th className="pb-2 pr-4 font-medium">Energy (kcal/mol)</th>
+                        {allPoses && <th className="pb-2 pr-4 font-medium">RMSD LB</th>}
+                        {allPoses && <th className="pb-2 font-medium">RMSD UB</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allPoses
+                        ? allPoses.map((pose, i) => {
+                            const q = bindingQuality(pose.affinity)
+                            return (
+                              <tr key={i} className="border-b border-[#2A2F3E]/50">
+                                <td className="py-2 pr-4 font-mono text-[#FAFAFA]">{i + 1}</td>
+                                <td className="py-2 pr-4" style={{ color: q.color }}>
+                                  {pose.affinity.toFixed(1)}
+                                </td>
+                                <td className="py-2 pr-4 font-mono text-[#8B949E]">{pose.rmsd_lb.toFixed(2)}</td>
+                                <td className="py-2 font-mono text-[#8B949E]">{pose.rmsd_ub.toFixed(2)}</td>
+                              </tr>
+                            )
+                          })
+                        : allEnergies?.map((energy, i) => {
+                            const q = bindingQuality(energy)
+                            return (
+                              <tr key={i} className="border-b border-[#2A2F3E]/50">
+                                <td className="py-2 pr-4 font-mono text-[#FAFAFA]">{i + 1}</td>
+                                <td className="py-2" style={{ color: q.color }}>
+                                  {energy.toFixed(1)}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {allEnergies && allEnergies.length > 1 && (
+            <Card className="border-[#2A2F3E] bg-[#1A1F2E]">
+              <CardContent className="pt-4">
+                <EnergyBarChart
+                  runs={allEnergies.map((e, i) => ({
+                    name: `Pose ${i + 1}`,
+                    best_energy: e,
+                  }))}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {files.length > 0 && (
+            <div>
+              <h2 className="mb-3 text-base font-semibold text-[#FAFAFA]">Output Files</h2>
+              <FilePanel files={files} />
+            </div>
+          )}
+
+          {runId && (
+            <RunReportPanel runId={runId} runType="dock" />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

@@ -168,6 +168,7 @@ def dock(
     return {
         "best_energy": best_energy,
         "all_energies": all_energies,
+        "all_poses": results,  # [{affinity, rmsd_lb, rmsd_ub}, ...]
         "output_path": str(output_path),
         "n_poses": len(results),
         "receptor": str(receptor_path),

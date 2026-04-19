@@ -25,6 +25,57 @@ logger = setup_logging("admet_check")
 # ── Public functions ─────────────────────────────────────────────────────────
 
 
+def admetlab_profile(smiles: str, retries: int = 3) -> dict | None:
+    """Call ADMETlab 3.0 API for comprehensive ADMET profiling.
+
+    Returns the parsed response data on success, or ``None`` if the API
+    is unavailable after all retry attempts.  Callers should fall back to
+    the local RDKit-based :func:`full_admet` when this returns ``None``.
+
+    Parameters
+    ----------
+    smiles : str
+        SMILES representation of the molecule.
+    retries : int
+        Number of attempts (default 3, with exponential back-off).
+
+    Returns
+    -------
+    dict or None
+    """
+    import requests
+    import time as _time
+
+    url = "https://admetlab3.scbdd.com/api/admet"
+
+    for attempt in range(retries):
+        try:
+            resp = requests.post(
+                url, json={"SMILES": [smiles]}, timeout=30
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("code") == 200 or "data" in data:
+                    logger.info("ADMETlab profile retrieved for %s", smiles[:40])
+                    return data.get("data", data)
+            logger.warning(
+                "ADMETlab attempt %d/%d: status %d",
+                attempt + 1, retries, resp.status_code,
+            )
+        except Exception as exc:
+            logger.warning(
+                "ADMETlab attempt %d/%d failed: %s", attempt + 1, retries, exc
+            )
+
+        if attempt < retries - 1:
+            _time.sleep(2 ** attempt)
+
+    logger.warning(
+        "ADMETlab unavailable after %d attempts, using RDKit fallback", retries
+    )
+    return None
+
+
 def calculate_sa_score(smiles: str) -> dict:
     """Calculate the Synthetic Accessibility (SA) Score for a molecule.
 

@@ -24,6 +24,9 @@ _logger = setup_logging("fetch_compounds")
 # PubChem PUG-REST base
 _PUG_BASE: str = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
 
+# NP Atlas REST API base
+NP_ATLAS_BASE: str = "https://www.npatlas.org/api/v1"
+
 
 # ── Public functions ─────────────────────────────────────────────────────────
 
@@ -279,6 +282,88 @@ def smiles_to_sdf(
         "name": name,
         "message": f"Generated 3-D SDF for {name!r}",
     }
+
+
+# ── NP Atlas search ──────────────────────────────────────────────────────────
+
+
+def _parse_npatlas_compound(c: dict) -> dict:
+    organism = c.get("origin_organism", {})
+    genus = organism.get("genus", "") if isinstance(organism, dict) else ""
+    species = organism.get("species", "") if isinstance(organism, dict) else ""
+    return {
+        "npaid": c.get("npaid"),
+        "name": c.get("original_name") or c.get("compound_name") or c.get("npaid"),
+        "smiles": c.get("smiles"),
+        "inchikey": c.get("inchikey"),
+        "organism": f"{genus} {species}".strip(),
+    }
+
+
+def search_npatlas(query: str, max_results: int = 20) -> list[dict]:
+    import requests  # lazy
+
+    query = query.strip()
+    if not query:
+        raise ValueError("Search query must not be empty")
+
+    _logger.info("Searching NP Atlas for %r…", query)
+    try:
+        resp = requests.post(
+            f"{NP_ATLAS_BASE}/compounds/basicSearch",
+            params={"name": query},
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        _logger.warning("NP Atlas unreachable: %s", exc)
+        return []
+
+    if resp.status_code != 200:
+        _logger.warning("NP Atlas search failed: %d", resp.status_code)
+        return []
+
+    compounds = resp.json()
+    if isinstance(compounds, list):
+        return [_parse_npatlas_compound(c) for c in compounds[:max_results]]
+    return []
+
+
+def search_npatlas_similar(
+    smiles: str,
+    threshold: float = 0.7,
+    max_results: int = 20,
+) -> list[dict]:
+    import requests  # lazy
+
+    smiles = smiles.strip()
+    if not smiles:
+        raise ValueError("SMILES string must not be empty")
+
+    _logger.info("NP Atlas similarity search for %r (threshold=%.2f)…", smiles, threshold)
+    try:
+        resp = requests.post(
+            f"{NP_ATLAS_BASE}/compounds/structureSearch",
+            params={
+                "structure": smiles,
+                "type": "smiles",
+                "method": "sim",
+                "threshold": threshold,
+                "limit": max_results,
+            },
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        _logger.warning("NP Atlas unreachable: %s", exc)
+        return []
+
+    if resp.status_code != 200:
+        _logger.warning("NP Atlas similarity search failed: %d", resp.status_code)
+        return []
+
+    compounds = resp.json()
+    if isinstance(compounds, list):
+        return [_parse_npatlas_compound(c) for c in compounds[:max_results]]
+    return []
 
 
 # ── Private helpers ──────────────────────────────────────────────────────────

@@ -9,3 +9,7 @@ __pycache__/
 molecopilot.db
 tmp/
 worktrees/
+.claude/mcp.json
+
+# Local Netlify folder
+.netlify
