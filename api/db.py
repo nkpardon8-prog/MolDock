@@ -257,9 +257,14 @@ def get_docking_runs(
 
 
 def get_docking_run(run_id: str, user_id: Optional[str] = None) -> Optional[dict]:
-    """Fetch a docking run by id. If user_id is provided, enforce ownership at
-    the query layer (service key bypasses RLS)."""
-    query = _supabase.table("docking_runs").select("*").eq("id", run_id)
+    """Fetch a docking run by id with joined protein + compound rows. If user_id
+    is provided, enforce ownership at the query layer (service key bypasses RLS).
+    Report generation relies on the joined fields for display_title and context."""
+    query = (
+        _supabase.table("docking_runs")
+        .select("*, proteins(pdb_id, title), compounds(name, smiles)")
+        .eq("id", run_id)
+    )
     if user_id is not None:
         query = query.eq("user_id", user_id)
     result = query.maybe_single().execute()

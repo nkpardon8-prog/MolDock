@@ -35,7 +35,11 @@ create extension if not exists "uuid-ossp";
 
 create table if not exists proteins (
     id          uuid primary key default uuid_generate_v4(),
-    created_by  uuid references auth.users(id) on delete cascade not null,
+    -- Shared catalog: one row per PDB entry. created_by is attribution
+    -- metadata for the first fetcher; ON DELETE SET NULL so account deletion
+    -- never removes the shared row (which would cascade-delete other users'
+    -- docking_runs against the same PDB).
+    created_by  uuid references auth.users(id) on delete set null,
     pdb_id      text unique not null,
     title       text,
     organism    text,
@@ -121,7 +125,9 @@ create policy "Users can delete their own compounds"
 create table if not exists docking_runs (
     id              uuid primary key default uuid_generate_v4(),
     user_id         uuid references auth.users(id) on delete cascade not null,
-    protein_id      uuid references proteins(id) on delete cascade not null,
+    -- RESTRICT on protein deletion — proteins are a shared catalog; no user
+    -- should be able to delete a protein row while any docking_run references it.
+    protein_id      uuid references proteins(id) on delete restrict not null,
     compound_id     uuid references compounds(id) on delete cascade not null,
     best_energy     double precision,
     all_energies    jsonb,

@@ -97,10 +97,7 @@ export default function DockPage() {
   const saScore = (resultData?.sa_score ?? admet?.sa_score) as number | undefined
   const saAssessment = (resultData?.sa_assessment ?? admet?.synthetic_assessment) as string | undefined
   const outputPath = resultData?.output_path as string | undefined
-  const receptorPath = resultData?.receptor_path as string | undefined
-  const ligandPath = resultData?.ligand_path as string | undefined
   const compoundName = resultData?.compound as string | undefined
-  const proteinName = resultData?.protein as string | undefined
   const runId = resultData?.run_id as string | undefined
   const proteinInfo = resultData?.protein_info as Record<string, unknown> | undefined
   const bindingSite = resultData?.binding_site as Record<string, unknown> | undefined
@@ -219,26 +216,16 @@ export default function DockPage() {
   const isRunning = submitting || status === 'connecting' || status === 'streaming'
   const quality = bestEnergy != null ? bindingQuality(bestEnergy) : null
 
-  const files = runId ? [
-    ...(outputPath ? [{
-      name: outputPath.split('/').pop() || 'docked.pdbqt',
-      type: 'docked' as const,
-      downloadUrl: `/api/results/${runId}/file`,
-      path: outputPath,
-    }] : []),
-    ...(receptorPath ? [{
-      name: receptorPath.split('/').pop() || 'receptor.pdbqt',
-      type: 'receptor' as const,
-      downloadUrl: `/api/proteins/${proteinName}/file`,
-      path: receptorPath,
-    }] : []),
-    ...(ligandPath ? [{
-      name: ligandPath.split('/').pop() || 'ligand.pdbqt',
-      type: 'ligand' as const,
-      downloadUrl: `/api/results/${runId}/file`,
-      path: ligandPath,
-    }] : []),
-  ] : []
+  // Only the docked output is exposed — the prepared receptor PDBQT and the
+  // pre-dock ligand PDBQT are not served by any endpoint, so advertising them
+  // with /api/proteins/{pdb}/file (raw PDB) or /api/results/{run}/file (docked
+  // output) would hand users the wrong file under a misleading label.
+  const files = runId && outputPath ? [{
+    name: outputPath.split('/').pop() || 'docked.pdbqt',
+    type: 'docked' as const,
+    downloadUrl: `/api/results/${runId}/file`,
+    path: outputPath,
+  }] : []
 
   return (
     <div className="flex flex-col gap-6 p-6">
