@@ -10,10 +10,16 @@ router = APIRouter(prefix="/export", tags=["export"])
 
 
 def _validate_results_dir(results_dir: str) -> Path:
-    """Validate results_dir stays within data_root. Prevents path traversal."""
+    """Validate results_dir stays within data_root. Prevents path traversal.
+    Rejects absolute paths (which would bypass root / joining) and sibling
+    directories whose name shares a prefix with data_root."""
+    if Path(results_dir).is_absolute():
+        raise HTTPException(status_code=403, detail="Absolute paths not allowed")
     root = Path(settings.data_root).resolve()
     full = (root / results_dir).resolve()
-    if not str(full).startswith(str(root)):
+    try:
+        full.relative_to(root)
+    except ValueError:
         raise HTTPException(status_code=403, detail="Path traversal not allowed")
     return full
 

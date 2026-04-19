@@ -23,6 +23,13 @@ def save_protein(
     pdbqt_path: Optional[str] = None,
     binding_site: Optional[dict] = None,
 ) -> dict:
+    # Proteins are a shared catalog — the schema enforces a global UNIQUE on
+    # pdb_id, so one row exists per PDB entry, period. PDB metadata (title,
+    # resolution, method) is public data by definition. binding_site on the
+    # row is a cosmetic cache; dock jobs always recompute via detect_binding_site
+    # and write per-run center/size to docking_runs. created_by records the
+    # first user who fetched the entry and is intentionally not overwritten on
+    # subsequent updates from other users.
     existing = (
         _supabase.table("proteins")
         .select("*")
@@ -82,10 +89,14 @@ def get_protein_by_id(protein_id: str) -> Optional[dict]:
     return result.data if result else None
 
 
-def get_all_proteins(limit: int = 20, offset: int = 0) -> list[dict]:
+def get_all_proteins(user_id: str, limit: int = 20, offset: int = 0) -> list[dict]:
+    # Even though proteins are a shared catalog (see save_protein), the /api/proteins
+    # list is scoped to the caller's fetch history for UI purposes — users should
+    # see only PDB entries they've personally pulled, not every entry in the DB.
     result = (
         _supabase.table("proteins")
         .select("*")
+        .eq("created_by", user_id)
         .order("created_at", desc=True)
         .range(offset, offset + limit - 1)
         .execute()
@@ -107,12 +118,18 @@ def save_compound(
     admet: Optional[dict] = None,
     drug_likeness_score: Optional[float] = None,
 ) -> dict:
+    # Compounds dedup per-user. Unlike proteins, the schema has no global UNIQUE
+    # on smiles — the app historically dedups by SMILES only, which caused
+    # cross-user contamination (user B's SMILES match updated user A's ADMET
+    # data). Scope dedup + update by created_by so each user owns their own
+    # compound row.
     existing = None
     if smiles:
         _res = (
             _supabase.table("compounds")
             .select("*")
             .eq("smiles", smiles)
+            .eq("created_by", created_by)
             .maybe_single()
             .execute()
         )
@@ -139,7 +156,7 @@ def save_compound(
         result = (
             _supabase.table("compounds")
             .update(update_row)
-            .eq("smiles", smiles)
+            .eq("id", existing["id"])
             .execute()
         )
         return result.data[0]
@@ -148,21 +165,23 @@ def save_compound(
         return result.data[0]
 
 
-def get_compound_by_smiles(smiles: str) -> Optional[dict]:
+def get_compound_by_smiles(smiles: str, user_id: str) -> Optional[dict]:
     result = (
         _supabase.table("compounds")
         .select("*")
         .eq("smiles", smiles)
+        .eq("created_by", user_id)
         .maybe_single()
         .execute()
     )
     return result.data if result else None
 
 
-def get_all_compounds(limit: int = 20, offset: int = 0) -> list[dict]:
+def get_all_compounds(user_id: str, limit: int = 20, offset: int = 0) -> list[dict]:
     result = (
         _supabase.table("compounds")
         .select("*")
+        .eq("created_by", user_id)
         .order("created_at", desc=True)
         .range(offset, offset + limit - 1)
         .execute()

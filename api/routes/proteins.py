@@ -27,7 +27,8 @@ def list_proteins(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    rows = get_all_proteins(limit=limit, offset=offset)
+    user_id = str(request.state.user_id)
+    rows = get_all_proteins(user_id=user_id, limit=limit, offset=offset)
     return {"items": rows, "limit": limit, "offset": offset}
 
 
