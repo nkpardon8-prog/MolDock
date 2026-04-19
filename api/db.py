@@ -89,14 +89,15 @@ def get_protein_by_id(protein_id: str) -> Optional[dict]:
     return result.data if result else None
 
 
-def get_all_proteins(user_id: str, limit: int = 20, offset: int = 0) -> list[dict]:
-    # Even though proteins are a shared catalog (see save_protein), the /api/proteins
-    # list is scoped to the caller's fetch history for UI purposes — users should
-    # see only PDB entries they've personally pulled, not every entry in the DB.
+def get_all_proteins(limit: int = 20, offset: int = 0) -> list[dict]:
+    # Intentionally unscoped. Proteins are a shared PDB catalog (see save_protein):
+    # the schema enforces UNIQUE(pdb_id), only one row exists per PDB entry, PDB
+    # data is public, and filtering by created_by would hide entries a second
+    # user fetched or docked against (since save_protein preserves first-fetcher
+    # attribution). No sensitive per-user data lives on this table.
     result = (
         _supabase.table("proteins")
         .select("*")
-        .eq("created_by", user_id)
         .order("created_at", desc=True)
         .range(offset, offset + limit - 1)
         .execute()

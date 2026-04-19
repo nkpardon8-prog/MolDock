@@ -8,7 +8,10 @@ _client = None
 def get_client() -> OpenAI:
     global _client
     if _client is None:
-        key = os.getenv("OPENROUTER_API_KEY")
+        # Prefer the value loaded by pydantic-settings from .env — os.environ
+        # isn't populated by dotenv loading in production.
+        from api.config import settings
+        key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
         if not key:
             raise RuntimeError("OPENROUTER_API_KEY not set")
         _client = OpenAI(

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -200,11 +201,38 @@ def run_chat_job(job_id: str, session_id: str, message: str):
     proc = None
     try:
         import threading
+        # KNOWN PRODUCTION RISK — see SECURITY.md (to-be-written) / PR #1.
+        # Running `claude -p --dangerously-skip-permissions` on untrusted web
+        # input gives prompt-controlled access to whatever the subprocess can
+        # read. We mitigate two ways here:
+        #
+        #   1. cwd is a scratch sandbox outside the repo, so relative-path
+        #      Read/Bash/Grep attacks (Read('.env'), Bash('cat supabase/schema.sql'))
+        #      don't hit project files. Absolute paths still work — this is
+        #      defense in depth, not a complete fix.
+        #   2. The subprocess inherits env but we scrub the env vars most
+        #      likely to be exfiltrated (OpenRouter + Supabase service/PAT keys)
+        #      before handing it over. The chat agent does not need these.
+        #
+        # Full hardening (tool allowlist via --allowedTools, prompt-injection
+        # filters, OS-level sandbox) is out of scope for this PR. Do NOT expose
+        # this endpoint to untrusted users in production until that lands.
+        sandbox = PROJECT_ROOT / "tmp" / "chat-sandbox"
+        sandbox.mkdir(parents=True, exist_ok=True)
+        scrubbed_env = {
+            k: v for k, v in os.environ.items()
+            if k not in {
+                "OPENROUTER_API_KEY", "SUPABASE_SERVICE_KEY", "SUPABASE_PAT",
+                "SUPABASE_DB_PASS", "NVIDIA_API_KEY", "PERPLEXITY_API_KEY",
+                "NCBI_API_KEY",
+            }
+        }
         proc = subprocess.Popen(
             ["claude", "-p", message, "--output-format", "stream-json",
              "--verbose", "--dangerously-skip-permissions"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-            cwd=str(PROJECT_ROOT),
+            cwd=str(sandbox),
+            env=scrubbed_env,
         )
 
         watchdog = threading.Timer(1800, lambda: proc.kill())
