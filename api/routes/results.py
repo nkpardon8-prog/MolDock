@@ -29,8 +29,9 @@ def list_results(
     energy_min: float | None = Query(None),
     energy_max: float | None = Query(None),
 ):
+    user_id = str(request.state.user_id)
     rows = get_docking_runs(
-        limit=limit, offset=offset,
+        user_id=user_id, limit=limit, offset=offset,
         protein_id=protein_id, energy_min=energy_min, energy_max=energy_max,
     )
     return {"items": rows, "limit": limit, "offset": offset}
@@ -38,7 +39,8 @@ def list_results(
 
 @router.get("/{run_id}")
 def get_result(request: Request, run_id: str):
-    row = get_docking_run(run_id)
+    user_id = str(request.state.user_id)
+    row = get_docking_run(run_id, user_id=user_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Docking run {run_id} not found")
     return row
@@ -46,7 +48,8 @@ def get_result(request: Request, run_id: str):
 
 @router.get("/{run_id}/file")
 def get_result_file(request: Request, run_id: str):
-    row = get_docking_run(run_id)
+    user_id = str(request.state.user_id)
+    row = get_docking_run(run_id, user_id=user_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Docking run {run_id} not found")
 
@@ -61,7 +64,8 @@ def get_result_file(request: Request, run_id: str):
 
 @router.post("/{run_id}/interactions")
 def compute_interactions(request: Request, run_id: str):
-    row = get_docking_run(run_id)
+    user_id = str(request.state.user_id)
+    row = get_docking_run(run_id, user_id=user_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"Docking run {run_id} not found")
 

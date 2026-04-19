@@ -79,7 +79,6 @@ export default function ResultsPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [compareIds, setCompareIds] = useState<string[]>([])
-  const [exporting, setExporting] = useState(false)
   const [projectFormOpen, setProjectFormOpen] = useState(false)
   const [projectQuestion, setProjectQuestion] = useState('')
   const [projectBusy, setProjectBusy] = useState(false)
@@ -216,20 +215,9 @@ export default function ResultsPage() {
     }
   }, [sortedRuns, projectQuestion])
 
-  const handleExportDocx = useCallback(async () => {
-    if (!sortedRuns.length) return
-    setExporting(true)
-    try {
-      await apiPost('/api/export', {
-        format: 'docx',
-        run_ids: sortedRuns.map((r) => r.id),
-      })
-    } catch {
-      // export failed
-    } finally {
-      setExporting(false)
-    }
-  }, [sortedRuns])
+  // The old "Export DOCX" button was superseded by the project-rollup Run Report
+  // (which exports via /api/reports/{id}/export). Removed rather than rewired to
+  // /api/export — that endpoint requires a filesystem results_dir we no longer use.
 
   const SortHeader = ({ label, field }: { label: string; field: SortKey }) => (
     <th className="py-2 pr-3 text-left text-[#8B949E] font-medium">
@@ -620,7 +608,7 @@ export default function ResultsPage() {
                           {
                             name: runDetail.output_path.split('/').pop() ?? 'output.pdbqt',
                             type: 'docked',
-                            downloadUrl: `/api/files?path=${encodeURIComponent(runDetail.output_path)}`,
+                            downloadUrl: `/api/results/${runDetail.id}/file`,
                             path: runDetail.output_path,
                           },
                         ]}
@@ -680,15 +668,6 @@ export default function ResultsPage() {
                 <Button variant="outline" onClick={handleExportCSV} className="border-[#2A2F3E] text-[#FAFAFA]">
                   <Download className="h-4 w-4" />
                   Download CSV
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={handleExportDocx}
-                  disabled={exporting}
-                  className="border-[#2A2F3E] text-[#FAFAFA]"
-                >
-                  {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                  Export DOCX
                 </Button>
               </div>
             </CardContent>

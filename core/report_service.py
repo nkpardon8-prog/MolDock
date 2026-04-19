@@ -43,8 +43,8 @@ def _verify_ownership(
     """Normalize ValueError from db helpers to PermissionError for the route layer."""
     try:
         if run_type == "dock":
-            row = get_docking_run(run_id) if run_id else None
-            if not row or row.get("user_id") != user_id:
+            row = get_docking_run(run_id, user_id=user_id) if run_id else None
+            if not row:
                 raise PermissionError("Not authorized")
         elif run_type == "optimize":
             if not run_id:
@@ -56,8 +56,8 @@ def _verify_ownership(
             verify_session_owner(run_id, user_id)
         elif run_type == "project":
             for rid in source_run_ids or []:
-                row = get_docking_run(rid)
-                if not row or row.get("user_id") != user_id:
+                row = get_docking_run(rid, user_id=user_id)
+                if not row:
                     raise PermissionError(f"Not authorized for run {rid}")
     except ValueError as e:
         raise PermissionError(str(e)) from e
@@ -166,7 +166,7 @@ def build_context(
     _verify_ownership(run_id, run_type, user_id, source_run_ids)
 
     if run_type == "dock":
-        run = get_docking_run(run_id)
+        run = get_docking_run(run_id, user_id=user_id)
         job = _find_dock_job(run_id)
         ctx = _prune_dock_context(run, job)
         proteins = run.get("proteins") or {}
@@ -205,9 +205,9 @@ def build_context(
         }
 
     # project rollup
-    runs = [get_docking_run(rid) for rid in (source_run_ids or [])]
+    runs = [get_docking_run(rid, user_id=user_id) for rid in (source_run_ids or [])]
     return {
-        "display_title": f"Project rollup — {len(runs)} runs",
+        "display_title": f"Project rollup - {len(runs)} runs",
         "runs": [
             _prune_dock_context(r, _find_dock_job(r["id"]))
             for r in runs

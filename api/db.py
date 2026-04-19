@@ -213,13 +213,19 @@ def save_docking_run(
 
 
 def get_docking_runs(
+    user_id: str,
     limit: int = 20,
     offset: int = 0,
     protein_id: Optional[str] = None,
     energy_min: Optional[float] = None,
     energy_max: Optional[float] = None,
 ) -> list[dict]:
-    query = _supabase.table("docking_runs").select("*, proteins(pdb_id, title), compounds(name, smiles)")
+    # Service key bypasses RLS; scope by user_id here or leak cross-user rows.
+    query = (
+        _supabase.table("docking_runs")
+        .select("*, proteins(pdb_id, title), compounds(name, smiles)")
+        .eq("user_id", user_id)
+    )
     if protein_id:
         query = query.eq("protein_id", protein_id)
     if energy_min is not None:
@@ -230,21 +236,21 @@ def get_docking_runs(
     return result.data
 
 
-def get_docking_run(run_id: str) -> Optional[dict]:
-    result = (
-        _supabase.table("docking_runs")
-        .select("*")
-        .eq("id", run_id)
-        .maybe_single()
-        .execute()
-    )
+def get_docking_run(run_id: str, user_id: Optional[str] = None) -> Optional[dict]:
+    """Fetch a docking run by id. If user_id is provided, enforce ownership at
+    the query layer (service key bypasses RLS)."""
+    query = _supabase.table("docking_runs").select("*").eq("id", run_id)
+    if user_id is not None:
+        query = query.eq("user_id", user_id)
+    result = query.maybe_single().execute()
     return result.data if result else None
 
 
-def get_recent_docking_runs(limit: int = 10) -> list[dict]:
+def get_recent_docking_runs(user_id: str, limit: int = 10) -> list[dict]:
     result = (
         _supabase.table("docking_runs")
         .select("*, proteins(pdb_id), compounds(name)")
+        .eq("user_id", user_id)
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
